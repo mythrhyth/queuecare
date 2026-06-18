@@ -2,7 +2,7 @@
 
 QueueCare is a dynamic, real-time queue management platform for clinics and hospitals designed to replace physical paper tokens with a live digital tracking experience. It keeps patients informed of their wait times and grants medical staff complete control over rooms, doctors, and patient queue priorities.
 
-Built for **hackathons, ease of deployment, and high-performance real-time updates**, QueueCare is 100% free-tier compatible and ready for instant cloud deployment.
+Built for **ease of deployment, and high-performance real-time updates**, QueueCare is 100% free-tier compatible and ready for instant cloud deployment.
 
 ---
 
