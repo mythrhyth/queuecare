@@ -1,0 +1,76 @@
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model User {
+  id       String @id @default(uuid())
+  email    String @unique
+  password String
+  name     String
+  role     String // "receptionist" | "admin"
+}
+
+model Room {
+  id        String    @id @default(uuid())
+  name      String    @unique // e.g. "Room 2"
+  capacity  Int       @default(20)
+  occupancy Int       @default(0)
+  status    String    @default("Available")
+  doctors   Doctor[]
+  patients  Patient[]
+}
+
+model Doctor {
+  id                            String    @id @default(uuid())
+  name                          String    @unique // e.g. "Dr. Sharma"
+  specialty                     String
+  available                     Boolean   @default(true)
+  status                        String    @default("Available")
+  roomId                        String?
+  room                          Room?     @relation(fields: [roomId], references: [id])
+  patients                      Patient[]
+  estimatedConsultationDuration Int       @default(15)
+}
+
+model Patient {
+  id                    String    @id @default(uuid())
+  token                 String    @unique
+  name                  String
+  phone                 String
+  type                  String    // "Normal", "Senior Citizen", "Emergency"
+  status                String    // "Waiting", "In Queue", "In Consultation", "Completed", "Skipped"
+  date                  String    // e.g. "2026-06-16"
+  registeredAt          String    // e.g. "11:57 AM"
+  createdAt             DateTime  @default(now())
+  notes                 String?
+  priority              String    // "Normal", "Senior Citizen", "Emergency"
+  position              Int       @default(0) // order index inside the room's queue
+  doctorId              String?
+  doctor                Doctor?   @relation(fields: [doctorId], references: [id])
+  roomId                String?
+  room                  Room?     @relation(fields: [roomId], references: [id])
+  consultationStartedAt DateTime?
+  consultationEndedAt   DateTime?
+  consultationDuration  Int?      // in seconds
+}
+
+model ClinicConfig {
+  id                String  @id @default("default")
+  avgConsultTime    String  @default("15")
+  tokenMethod       String  @default("sequential") // "sequential" | "random" | "alphabetic"
+  maxQueue          String  @default("50")
+  prioritySenior    Boolean @default(true)
+  priorityEmergency Boolean @default(true)
+}
+
+model NotificationSettings {
+  id          String  @id @default("default")
+  browser     Boolean @default(true)
+  sms         Boolean @default(false)
+  queueAlerts Boolean @default(true)
+}
