@@ -1,10 +1,17 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeftRight, CheckCircle, SkipForward, ChevronRight, Clock, Users } from "lucide-react";
+import { ArrowLeftRight, CheckCircle, SkipForward, ChevronRight, Clock, Users, DoorOpen } from "lucide-react";
 import { roomsService } from "../../services/rooms.service";
 import { queueService } from "../../services/queue.service";
 import { socketService } from "../../services/socket";
 import { Patient, PatientStatus } from "../../types";
+
+// UI Components
+import { CardSkeleton } from "./ui/CardSkeleton";
+import { TableSkeleton } from "./ui/TableSkeleton";
+import { EmptyState } from "./ui/EmptyState";
+import { ErrorState } from "./ui/ErrorState";
+import { Skeleton } from "./ui/skeleton";
 
 const STATUS_STYLES: Record<PatientStatus, string> = {
   "In Consultation": "bg-blue-100 text-blue-700",
@@ -44,15 +51,20 @@ export function RoomTransfer() {
   };
 
   // Queries
-  const { data: roomsResponse } = useQuery({
+  const { data: roomsResponse, isLoading: isLoadingRooms, isError: isErrorRooms, refetch: refetchRooms } = useQuery({
     queryKey: ["rooms"],
     queryFn: () => roomsService.getRooms(),
   });
 
-  const { data: liveQueueResponse } = useQuery({
+  const { data: liveQueueResponse, isLoading: isLoadingQueue, isError: isErrorQueue, refetch: refetchQueue } = useQuery({
     queryKey: ["liveQueue"],
     queryFn: () => queueService.getLiveQueue(),
   });
+
+  const handleRetryAll = useCallback(() => {
+    refetchRooms();
+    refetchQueue();
+  }, [refetchRooms, refetchQueue]);
 
   const rooms = roomsResponse || [];
   const liveQueue = liveQueueResponse || [];
@@ -74,6 +86,7 @@ export function RoomTransfer() {
 
     socketService.on("queue:updated", handleQueueUpdate);
     socketService.on("rooms:updated", handleQueueUpdate);
+    socketService.on("doctors:updated", handleQueueUpdate);
 
     // Standardized new events
     socketService.on("queue-updated", handleQueueUpdate);
@@ -89,6 +102,7 @@ export function RoomTransfer() {
     return () => {
       socketService.off("queue:updated", handleQueueUpdate);
       socketService.off("rooms:updated", handleQueueUpdate);
+      socketService.off("doctors:updated", handleQueueUpdate);
 
       socketService.off("queue-updated", handleQueueUpdate);
       socketService.off("patient-added", handleQueueUpdate);
@@ -101,6 +115,56 @@ export function RoomTransfer() {
       socketService.off("doctor-status-updated", handleQueueUpdate);
     };
   }, [queryClient]);
+
+  const isLoading = isLoadingRooms || isLoadingQueue;
+  const isError = isErrorRooms || isErrorQueue;
+
+  if (isError) {
+    return (
+      <div className="p-4 sm:p-6">
+        <ErrorState onRetry={handleRetryAll} />
+      </div>
+    );
+  }
+
+  if (isLoading) {
+    return (
+      <div className="p-4 sm:p-6 space-y-5">
+        {/* Room Tabs Skeleton */}
+        <div className="bg-white rounded-2xl p-4 border border-border shadow-sm">
+          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-3">Select Room</p>
+          <CardSkeleton variant="room" count={4} />
+        </div>
+
+        {/* Queue Management Panel Skeleton */}
+        <div className="bg-white rounded-2xl border border-border shadow-sm overflow-hidden">
+          <div className="p-5 border-b border-border flex items-center justify-between">
+            <div className="space-y-1.5 flex-1">
+              <Skeleton className="h-5 w-24 rounded" />
+              <Skeleton className="h-4 w-40 rounded" />
+            </div>
+            <Skeleton className="h-4 w-10 rounded animate-pulse" />
+          </div>
+          <div className="p-4 space-y-4">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <div key={i} className="flex items-center gap-3">
+                <Skeleton className="w-8 h-8 rounded-lg flex-shrink-0" />
+                <div className="space-y-1.5 flex-1">
+                  <Skeleton className="h-4 w-1/3 rounded" />
+                  <Skeleton className="h-3.5 w-1/4 rounded" />
+                </div>
+                <Skeleton className="h-6 w-12 rounded-full hidden sm:block" />
+                <div className="flex gap-2">
+                  <Skeleton className="h-8 w-16 rounded-lg" />
+                  <Skeleton className="h-8 w-16 rounded-lg" />
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   const showFeedback = (msg: string) => {
     setActionFeedback(msg);
@@ -188,7 +252,13 @@ export function RoomTransfer() {
             );
           })}
           {rooms.length === 0 && (
-            <p className="text-sm text-muted-foreground text-center col-span-4 py-4">No rooms configured.</p>
+            <div className="col-span-4 p-4">
+              <EmptyState
+                icon={DoorOpen}
+                title="No Rooms Configured"
+                description="We couldn't find any clinic rooms. Please add a room in Settings first."
+              />
+            </div>
           )}
         </div>
       </div>
@@ -207,9 +277,12 @@ export function RoomTransfer() {
         </div>
 
         {currentList.length === 0 ? (
-          <div className="py-16 text-center">
-            <Users className="w-10 h-10 text-muted-foreground/40 mx-auto mb-3" />
-            <p className="text-muted-foreground text-sm">No patients in this room</p>
+          <div className="p-6">
+            <EmptyState
+              icon={Users}
+              title="No Patients in Queue"
+              description={`There are currently no patients waiting or consulting in ${activeRoom}.`}
+            />
           </div>
         ) : (
           <div className="divide-y divide-border">
