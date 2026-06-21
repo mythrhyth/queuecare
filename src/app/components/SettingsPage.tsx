@@ -1,9 +1,13 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Plus, Edit2, Trash2, Save, Clock, Hash, Bell, Users, DoorOpen, Check } from "lucide-react";
 import { settingsService } from "../../services/settings.service";
 import { socketService } from "../../services/socket";
 import { Doctor, Room } from "../../types";
+
+// UI Components
+import { ErrorState } from "./ui/ErrorState";
+import { Skeleton } from "./ui/skeleton";
 
 type Section = "clinic" | "doctors" | "rooms" | "notifications";
 
@@ -20,22 +24,22 @@ export function SettingsPage() {
   const queryClient = useQueryClient();
 
   // Queries
-  const { data: initialClinicConfig } = useQuery({
+  const { data: initialClinicConfig, isLoading: isLoadingClinic, isError: isErrorClinic, refetch: refetchClinic } = useQuery({
     queryKey: ["settingsClinicConfig"],
     queryFn: () => settingsService.getClinicConfig(),
   });
 
-  const { data: initialNotificationSettings } = useQuery({
+  const { data: initialNotificationSettings, isLoading: isLoadingNotifications, isError: isErrorNotifications, refetch: refetchNotifications } = useQuery({
     queryKey: ["settingsNotificationSettings"],
     queryFn: () => settingsService.getNotificationSettings(),
   });
 
-  const { data: initialDoctorsData } = useQuery({
+  const { data: initialDoctorsData, isLoading: isLoadingDoctors, isError: isErrorDoctors, refetch: refetchDoctors } = useQuery({
     queryKey: ["settingsDoctors"],
     queryFn: () => settingsService.getDoctors(),
   });
 
-  const { data: initialRoomsData } = useQuery({
+  const { data: initialRoomsData, isLoading: isLoadingRooms, isError: isErrorRooms, refetch: refetchRooms } = useQuery({
     queryKey: ["settingsRooms"],
     queryFn: () => settingsService.getRooms(),
   });
@@ -206,11 +210,13 @@ export function SettingsPage() {
 
     socketService.on("settings:updated", handleSettingsUpdate);
     socketService.on("doctors:updated", handleDoctorsUpdate);
+    socketService.on("doctor-status-updated", handleDoctorsUpdate);
     socketService.on("rooms:updated", handleRoomsUpdate);
 
     return () => {
       socketService.off("settings:updated", handleSettingsUpdate);
       socketService.off("doctors:updated", handleDoctorsUpdate);
+      socketService.off("doctor-status-updated", handleDoctorsUpdate);
       socketService.off("rooms:updated", handleRoomsUpdate);
     };
   }, [queryClient]);
@@ -393,6 +399,67 @@ export function SettingsPage() {
       alert("Failed to add room: " + err.message);
     }
   };
+
+  const isLoading = isLoadingClinic || isLoadingNotifications || isLoadingDoctors || isLoadingRooms;
+  const isError = isErrorClinic || isErrorNotifications || isErrorDoctors || isErrorRooms;
+
+  const handleRetryAll = useCallback(() => {
+    refetchClinic();
+    refetchNotifications();
+    refetchDoctors();
+    refetchRooms();
+  }, [refetchClinic, refetchNotifications, refetchDoctors, refetchRooms]);
+
+  if (isError) {
+    return (
+      <div className="p-4 sm:p-6">
+        <ErrorState onRetry={handleRetryAll} />
+      </div>
+    );
+  }
+
+  if (isLoading) {
+    return (
+      <div className="p-4 sm:p-6">
+        <div className="max-w-5xl mx-auto">
+          <div className="grid md:grid-cols-4 gap-5">
+            {/* Sidebar Skeleton */}
+            <div className="md:col-span-1">
+              <div className="bg-white rounded-2xl border border-border shadow-sm p-3 space-y-2">
+                {Array.from({ length: 4 }).map((_, i) => (
+                  <Skeleton key={i} className="h-10 w-full rounded-xl" />
+                ))}
+              </div>
+            </div>
+            {/* Content Skeleton */}
+            <div className="md:col-span-3">
+              <div className="bg-white rounded-2xl border border-border shadow-sm p-6 space-y-6">
+                <div className="space-y-2">
+                  <Skeleton className="h-6 w-1/3 rounded" />
+                  <Skeleton className="h-4 w-1/2 rounded" />
+                </div>
+                <div className="space-y-4">
+                  <div className="space-y-2">
+                    <Skeleton className="h-4 w-1/4 rounded" />
+                    <Skeleton className="h-10 w-full rounded-xl" />
+                  </div>
+                  <div className="space-y-2">
+                    <Skeleton className="h-4 w-1/4 rounded" />
+                    <Skeleton className="h-10 w-full rounded-xl" />
+                  </div>
+                  <div className="space-y-2">
+                    <Skeleton className="h-4 w-1/4 rounded" />
+                    <Skeleton className="h-10 w-full rounded-xl" />
+                  </div>
+                </div>
+                <Skeleton className="h-11 w-32 rounded-xl animate-pulse" />
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="p-4 sm:p-6">

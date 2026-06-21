@@ -5,6 +5,11 @@ import { patientsService } from "../../services/patients.service";
 import { socketService } from "../../services/socket";
 import { Patient, PatientStatus, PatientType } from "../../types";
 
+// UI Components
+import { TableSkeleton } from "./ui/TableSkeleton";
+import { EmptyState } from "./ui/EmptyState";
+import { ErrorState } from "./ui/ErrorState";
+
 const STATUS_STYLES: Record<string, string> = {
   "In Consultation": "bg-blue-100 text-blue-700 border border-blue-200",
   "In Queue": "bg-teal-100 text-teal-700 border border-teal-200",
@@ -60,7 +65,7 @@ export function PatientRecords() {
   const { fromDate, toDate } = getFromToDates();
 
   // Fetch patients list
-  const { data: recordsData } = useQuery({
+  const { data: recordsData, isLoading: isLoadingRecords, isError: isErrorRecords, refetch: refetchRecords } = useQuery({
     queryKey: ["patients", statusFilter, typeFilter, search, datePreset, fromDate, toDate],
     queryFn: () => patientsService.getPatients({
       status: statusFilter as any,
@@ -80,9 +85,25 @@ export function PatientRecords() {
     const handleQueueUpdate = () => {
       queryClient.invalidateQueries({ queryKey: ["patients"] });
     };
+
     socketService.on("queue:updated", handleQueueUpdate);
+    socketService.on("queue-updated", handleQueueUpdate);
+    socketService.on("patient-added", handleQueueUpdate);
+    socketService.on("patient-updated", handleQueueUpdate);
+    socketService.on("patient-promoted", handleQueueUpdate);
+    socketService.on("patient-completed", handleQueueUpdate);
+    socketService.on("patient-cancelled", handleQueueUpdate);
+    socketService.on("patient-transferred", handleQueueUpdate);
+
     return () => {
       socketService.off("queue:updated", handleQueueUpdate);
+      socketService.off("queue-updated", handleQueueUpdate);
+      socketService.off("patient-added", handleQueueUpdate);
+      socketService.off("patient-updated", handleQueueUpdate);
+      socketService.off("patient-promoted", handleQueueUpdate);
+      socketService.off("patient-completed", handleQueueUpdate);
+      socketService.off("patient-cancelled", handleQueueUpdate);
+      socketService.off("patient-transferred", handleQueueUpdate);
     };
   }, [queryClient]);
 
@@ -184,68 +205,78 @@ export function PatientRecords() {
       )}
 
       {/* Table */}
-      <div className="bg-white rounded-2xl border border-border shadow-sm overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full">
-            <thead>
-              <tr className="border-b border-border bg-muted/50">
-                {["Token", "Patient", "Phone", "Doctor", "Type", "Status", "Date & Time", "Wait"].map(col => (
-                  <th key={col} className="text-left px-4 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wider whitespace-nowrap">{col}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-border">
-              {filtered.map(row => {
-                const doctorName = row.doctorName || (row as any).doctor || "–";
-                const priorityType = row.type || row.priority || "Normal";
-                return (
-                  <tr
-                    key={row.id}
-                    onClick={() => setSelected(row)}
-                    className="hover:bg-muted/30 transition-colors cursor-pointer"
-                  >
-                    <td className="px-4 py-3">
-                      <span className="font-mono text-sm font-bold text-primary">{row.token}</span>
-                    </td>
-                    <td className="px-4 py-3">
-                      <div className="flex items-center gap-2">
-                        <div className="w-7 h-7 bg-secondary rounded-full flex items-center justify-center text-primary text-xs font-bold flex-shrink-0">
-                          {row.name[0]}
-                        </div>
-                        <span className="text-sm font-medium text-foreground whitespace-nowrap">{row.name}</span>
-                      </div>
-                    </td>
-                    <td className="px-4 py-3 text-sm text-muted-foreground whitespace-nowrap">{row.phone}</td>
-                    <td className="px-4 py-3 text-sm text-foreground whitespace-nowrap">{doctorName}</td>
-                    <td className="px-4 py-3">
-                      <span className={`text-xs px-2 py-0.5 rounded-full font-medium whitespace-nowrap ${TYPE_STYLES[priorityType] || TYPE_STYLES.Normal}`}>
-                        {priorityType}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3">
-                      <span className={`text-xs px-2.5 py-1 rounded-full font-medium whitespace-nowrap ${STATUS_STYLES[row.status] || "bg-gray-100 text-gray-500"}`}>
-                        {row.status}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 text-sm text-muted-foreground whitespace-nowrap">
-                      <div>{new Date(row.date).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}</div>
-                      <div className="text-xs text-muted-foreground/70">{row.registeredAt}</div>
-                    </td>
-                    <td className="px-4 py-3 text-sm text-muted-foreground">{row.waitTime}</td>
-                  </tr>
-                );
-              })}
-              {filtered.length === 0 && (
-                <tr>
-                  <td colSpan={8} className="text-center py-12 text-muted-foreground text-sm">
-                    No patients match your search.
-                  </td>
+      {isErrorRecords ? (
+        <ErrorState onRetry={() => refetchRecords()} />
+      ) : isLoadingRecords ? (
+        <TableSkeleton headers={["Token", "Patient", "Phone", "Doctor", "Type", "Status", "Date & Time", "Wait"]} rowCount={6} />
+      ) : (
+        <div className="bg-white rounded-2xl border border-border shadow-sm overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead>
+                <tr className="border-b border-border bg-muted/50">
+                  {["Token", "Patient", "Phone", "Doctor", "Type", "Status", "Date & Time", "Wait"].map(col => (
+                    <th key={col} className="text-left px-4 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wider whitespace-nowrap">{col}</th>
+                  ))}
                 </tr>
-              )}
-            </tbody>
-          </table>
+              </thead>
+              <tbody className="divide-y divide-border">
+                {filtered.map(row => {
+                  const doctorName = row.doctorName || (row as any).doctor || "–";
+                  const priorityType = row.type || row.priority || "Normal";
+                  return (
+                    <tr
+                      key={row.id}
+                      onClick={() => setSelected(row)}
+                      className="hover:bg-muted/30 transition-colors cursor-pointer"
+                    >
+                      <td className="px-4 py-3">
+                        <span className="font-mono text-sm font-bold text-primary">{row.token}</span>
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-2">
+                          <div className="w-7 h-7 bg-secondary rounded-full flex items-center justify-center text-primary text-xs font-bold flex-shrink-0">
+                            {row.name[0]}
+                          </div>
+                          <span className="text-sm font-medium text-foreground whitespace-nowrap">{row.name}</span>
+                        </div>
+                      </td>
+                      <td className="px-4 py-3 text-sm text-muted-foreground whitespace-nowrap">{row.phone}</td>
+                      <td className="px-4 py-3 text-sm text-foreground whitespace-nowrap">{doctorName}</td>
+                      <td className="px-4 py-3">
+                        <span className={`text-xs px-2 py-0.5 rounded-full font-medium whitespace-nowrap ${TYPE_STYLES[priorityType] || TYPE_STYLES.Normal}`}>
+                          {priorityType}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className={`text-xs px-2.5 py-1 rounded-full font-medium whitespace-nowrap ${STATUS_STYLES[row.status] || "bg-gray-100 text-gray-500"}`}>
+                          {row.status}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-sm text-muted-foreground whitespace-nowrap">
+                        <div>{new Date(row.date).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}</div>
+                        <div className="text-xs text-muted-foreground/70">{row.registeredAt}</div>
+                      </td>
+                      <td className="px-4 py-3 text-sm text-muted-foreground">{row.waitTime}</td>
+                    </tr>
+                  );
+                })}
+                {filtered.length === 0 && (
+                  <tr>
+                    <td colSpan={8} className="p-8">
+                      <EmptyState
+                        icon={Search}
+                        title="No Records Found"
+                        description="We couldn't find any patient records matching your filters."
+                      />
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Patient Detail Modal */}
       {selected && (

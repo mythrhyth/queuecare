@@ -5,6 +5,12 @@ import { patientsService } from "../../services/patients.service";
 import { socketService } from "../../services/socket";
 import { Patient } from "../../types";
 
+// UI Components
+import { CardSkeleton } from "./ui/CardSkeleton";
+import { EmptyState } from "./ui/EmptyState";
+import { ErrorState } from "./ui/ErrorState";
+import { Skeleton } from "./ui/skeleton";
+
 const STATUS_STYLES: Record<string, string> = {
   "In Consultation": "bg-blue-100 text-blue-700 border border-blue-200",
   "In Queue": "bg-teal-100 text-teal-700 border border-teal-200",
@@ -29,7 +35,7 @@ export function TrackPatient() {
   const queryClient = useQueryClient();
 
   // Query matching patients across all dates
-  const { data: patientsData, isLoading, refetch } = useQuery({
+  const { data: patientsData, isLoading, isError: isErrorPatients, refetch } = useQuery({
     queryKey: ["trackPatients", submittedQuery],
     queryFn: () => patientsService.getPatients({
       search: submittedQuery.trim() || undefined,
@@ -59,9 +65,33 @@ export function TrackPatient() {
     const handleQueueUpdate = () => {
       queryClient.invalidateQueries({ queryKey: ["trackPatients"] });
     };
+
     socketService.on("queue:updated", handleQueueUpdate);
+    socketService.on("queue-updated", handleQueueUpdate);
+    socketService.on("patient-added", handleQueueUpdate);
+    socketService.on("patient-updated", handleQueueUpdate);
+    socketService.on("patient-promoted", handleQueueUpdate);
+    socketService.on("patient-completed", handleQueueUpdate);
+    socketService.on("patient-cancelled", handleQueueUpdate);
+    socketService.on("patient-transferred", handleQueueUpdate);
+    socketService.on("wait-time-updated", handleQueueUpdate);
+    socketService.on("doctor-status-updated", handleQueueUpdate);
+    socketService.on("rooms:updated", handleQueueUpdate);
+    socketService.on("doctors:updated", handleQueueUpdate);
+
     return () => {
       socketService.off("queue:updated", handleQueueUpdate);
+      socketService.off("queue-updated", handleQueueUpdate);
+      socketService.off("patient-added", handleQueueUpdate);
+      socketService.off("patient-updated", handleQueueUpdate);
+      socketService.off("patient-promoted", handleQueueUpdate);
+      socketService.off("patient-completed", handleQueueUpdate);
+      socketService.off("patient-cancelled", handleQueueUpdate);
+      socketService.off("patient-transferred", handleQueueUpdate);
+      socketService.off("wait-time-updated", handleQueueUpdate);
+      socketService.off("doctor-status-updated", handleQueueUpdate);
+      socketService.off("rooms:updated", handleQueueUpdate);
+      socketService.off("doctors:updated", handleQueueUpdate);
     };
   }, [queryClient]);
 
@@ -128,8 +158,48 @@ export function TrackPatient() {
         </div>
       </form>
 
+      {/* Error State */}
+      {submittedQuery && isErrorPatients && (
+        <ErrorState title="Tracking search failed" onRetry={() => refetch()} />
+      )}
+
+      {/* Loading Skeletons */}
+      {submittedQuery && isLoading && (
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          <div className="bg-white rounded-2xl border border-border shadow-sm p-4 space-y-3 lg:col-span-1">
+            <Skeleton className="h-4 w-32 rounded" />
+            <div className="space-y-2">
+              <Skeleton className="h-16 w-full rounded-xl animate-pulse" />
+              <Skeleton className="h-16 w-full rounded-xl animate-pulse" />
+            </div>
+          </div>
+          <div className="lg:col-span-2 space-y-6">
+            <div className="bg-white rounded-3xl border border-border shadow-sm overflow-hidden">
+              <div className="bg-gradient-to-r from-blue-50/50 to-teal-50/50 p-6 flex items-center gap-4 animate-pulse">
+                <Skeleton className="w-16 h-16 rounded-2xl flex-shrink-0" />
+                <div className="space-y-2 flex-1">
+                  <Skeleton className="h-6 w-1/3 rounded" />
+                  <Skeleton className="h-4 w-1/4 rounded" />
+                </div>
+              </div>
+              <div className="p-6 grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {Array.from({ length: 6 }).map((_, i) => (
+                  <div key={i} className="flex items-start gap-3 p-3 bg-muted/40 rounded-xl border border-border/50 animate-pulse">
+                    <Skeleton className="w-8 h-8 rounded-lg flex-shrink-0" />
+                    <div className="space-y-1.5 flex-1">
+                      <Skeleton className="h-3 w-1/3 rounded" />
+                      <Skeleton className="h-4 w-2/3 rounded" />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Lookup Content */}
-      {submittedQuery && (
+      {submittedQuery && !isLoading && !isErrorPatients && (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* Matches List (If multiple found) */}
           {patients.length > 1 && (
@@ -273,20 +343,20 @@ export function TrackPatient() {
 
       {/* Initial Empty State */}
       {!submittedQuery && (
-        <div className="bg-white rounded-2xl border border-border shadow-sm py-20 text-center space-y-3">
-          <Activity className="w-12 h-12 text-muted-foreground/30 mx-auto" />
-          <h3 className="font-semibold text-foreground">Track Patient Status</h3>
-          <p className="text-sm text-muted-foreground max-w-sm mx-auto">Enter a token number, name, or phone number above to inspect active positions and past medical queue history.</p>
-        </div>
+        <EmptyState
+          icon={Activity}
+          title="Track Patient Status"
+          description="Enter a token number, name, or phone number above to inspect active positions and past medical queue history."
+        />
       )}
 
       {/* Search Empty State */}
-      {submittedQuery && patients.length === 0 && !isLoading && (
-        <div className="bg-white rounded-2xl border border-border shadow-sm py-20 text-center space-y-3">
-          <Search className="w-12 h-12 text-muted-foreground/30 mx-auto" />
-          <h3 className="font-semibold text-foreground">No Patients Found</h3>
-          <p className="text-sm text-muted-foreground max-w-sm mx-auto">We couldn't find any patient matching "{submittedQuery}" in our database.</p>
-        </div>
+      {submittedQuery && patients.length === 0 && !isLoading && !isErrorPatients && (
+        <EmptyState
+          icon={Search}
+          title="No Patients Found"
+          description={`We couldn't find any patient matching "${submittedQuery}" in our database.`}
+        />
       )}
     </div>
   );

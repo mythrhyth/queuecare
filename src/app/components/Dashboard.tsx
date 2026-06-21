@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AreaChart, Area, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, LineChart, Line
@@ -7,6 +7,13 @@ import { Users, Clock, CheckCircle, UserCheck, Activity, Search, TrendingUp, Tre
 import { analyticsService } from "../../services/analytics.service";
 import { queueService } from "../../services/queue.service";
 import { socketService } from "../../services/socket";
+
+// UI Components
+import { CardSkeleton } from "./ui/CardSkeleton";
+import { TableSkeleton } from "./ui/TableSkeleton";
+import { EmptyState } from "./ui/EmptyState";
+import { ErrorState } from "./ui/ErrorState";
+import { Skeleton } from "./ui/skeleton";
 
 const STATUS_STYLES: Record<string, string> = {
   "In Consultation": "bg-blue-100 text-blue-700",
@@ -38,35 +45,44 @@ export function Dashboard() {
   };
 
   // Queries
-  const { data: kpiData, isLoading: isLoadingKpi } = useQuery({
+  const { data: kpiData, isLoading: isLoadingKpi, isError: isErrorKpi, refetch: refetchKpi } = useQuery({
     queryKey: ["analyticsKpis"],
     queryFn: () => analyticsService.getKpis(),
   });
 
-  const { data: peakHoursResponse, isLoading: isLoadingPeakHours } = useQuery({
+  const { data: peakHoursResponse, isLoading: isLoadingPeakHours, isError: isErrorPeakHours, refetch: refetchPeakHours } = useQuery({
     queryKey: ["analyticsPeakHours"],
     queryFn: () => analyticsService.getPeakHours(),
   });
 
-  const { data: doctorLoadResponse, isLoading: isLoadingDoctorLoad } = useQuery({
+  const { data: doctorLoadResponse, isLoading: isLoadingDoctorLoad, isError: isErrorDoctorLoad, refetch: refetchDoctorLoad } = useQuery({
     queryKey: ["analyticsDoctorLoad"],
     queryFn: () => analyticsService.getDoctorLoad(),
   });
 
-  const { data: volumeTrendResponse, isLoading: isLoadingVolumeTrend } = useQuery({
+  const { data: volumeTrendResponse, isLoading: isLoadingVolumeTrend, isError: isErrorVolumeTrend, refetch: refetchVolumeTrend } = useQuery({
     queryKey: ["analyticsVolumeTrend"],
     queryFn: () => analyticsService.getVolumeTrend(),
   });
 
-  const { data: roomUtilizationResponse, isLoading: isLoadingRoomUtilization } = useQuery({
+  const { data: roomUtilizationResponse, isLoading: isLoadingRoomUtilization, isError: isErrorRoomUtilization, refetch: refetchRoomUtilization } = useQuery({
     queryKey: ["analyticsRoomUtilization"],
     queryFn: () => analyticsService.getRoomUtilization(),
   });
 
-  const { data: liveQueueResponse, isLoading: isLoadingLiveQueue } = useQuery({
+  const { data: liveQueueResponse, isLoading: isLoadingLiveQueue, isError: isErrorLiveQueue, refetch: refetchLiveQueue } = useQuery({
     queryKey: ["liveQueue"],
     queryFn: () => queueService.getLiveQueue(),
   });
+
+  const handleRetryAll = useCallback(() => {
+    refetchKpi();
+    refetchPeakHours();
+    refetchDoctorLoad();
+    refetchVolumeTrend();
+    refetchRoomUtilization();
+    refetchLiveQueue();
+  }, [refetchKpi, refetchPeakHours, refetchDoctorLoad, refetchVolumeTrend, refetchRoomUtilization, refetchLiveQueue]);
 
   // Socket setup
   useEffect(() => {
@@ -87,8 +103,21 @@ export function Dashboard() {
       queryClient.invalidateQueries({ queryKey: ["analyticsRoomUtilization"] });
     };
 
+    const handleRoomsUpdate = () => {
+      queryClient.invalidateQueries({ queryKey: ["analyticsRoomUtilization"] });
+      queryClient.invalidateQueries({ queryKey: ["liveQueue"] });
+    };
+
+    const handleDoctorsUpdate = () => {
+      queryClient.invalidateQueries({ queryKey: ["analyticsDoctorLoad"] });
+      queryClient.invalidateQueries({ queryKey: ["liveQueue"] });
+    };
+
+    // Bind listeners
     socketService.on("queue:updated", handleQueueUpdate);
     socketService.on("analytics:updated", handleAnalyticsUpdate);
+    socketService.on("rooms:updated", handleRoomsUpdate);
+    socketService.on("doctors:updated", handleDoctorsUpdate);
 
     // Standardized new events
     socketService.on("queue-updated", handleQueueUpdate);
@@ -104,6 +133,8 @@ export function Dashboard() {
     return () => {
       socketService.off("queue:updated", handleQueueUpdate);
       socketService.off("analytics:updated", handleAnalyticsUpdate);
+      socketService.off("rooms:updated", handleRoomsUpdate);
+      socketService.off("doctors:updated", handleDoctorsUpdate);
 
       socketService.off("queue-updated", handleQueueUpdate);
       socketService.off("patient-added", handleQueueUpdate);
@@ -153,15 +184,69 @@ export function Dashboard() {
   }) || [];
 
   const isLoading = isLoadingKpi || isLoadingPeakHours || isLoadingDoctorLoad || isLoadingVolumeTrend || isLoadingRoomUtilization || isLoadingLiveQueue;
+  const isError = isErrorKpi || isErrorPeakHours || isErrorDoctorLoad || isErrorVolumeTrend || isErrorRoomUtilization || isErrorLiveQueue;
+
+  if (isError) {
+    return (
+      <div className="p-4 sm:p-6">
+        <ErrorState onRetry={handleRetryAll} />
+      </div>
+    );
+  }
 
   if (isLoading) {
     return (
-      <div className="flex flex-col items-center justify-center min-h-[400px] gap-3">
-        <svg className="animate-spin w-8 h-8 text-primary" viewBox="0 0 24 24" fill="none">
-          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-        </svg>
-        <p className="text-sm text-muted-foreground font-medium">Loading Dashboard Data...</p>
+      <div className="p-4 sm:p-6 space-y-6">
+        {/* KPI Cards Skeletons */}
+        <CardSkeleton variant="kpi" count={5} />
+
+        {/* Charts Row 1 Skeletons */}
+        <div className="grid lg:grid-cols-3 gap-4">
+          <div className="lg:col-span-2 bg-white rounded-2xl p-5 border border-border shadow-sm space-y-4">
+            <div className="flex items-center justify-between">
+              <div className="space-y-1.5 flex-1">
+                <Skeleton className="h-5 w-1/3 rounded" />
+                <Skeleton className="h-4 w-1/2 rounded" />
+              </div>
+              <Skeleton className="h-6 w-12 rounded-full" />
+            </div>
+            <Skeleton className="h-[180px] w-full rounded-xl" />
+          </div>
+          <div className="bg-white rounded-2xl p-5 border border-border shadow-sm space-y-4">
+            <div className="space-y-1.5">
+              <Skeleton className="h-5 w-1/2 rounded" />
+              <Skeleton className="h-4 w-1/3 rounded" />
+            </div>
+            <div className="flex items-center justify-center py-2">
+              <Skeleton className="h-28 w-28 rounded-full" />
+            </div>
+            <div className="space-y-2">
+              <Skeleton className="h-4 w-full rounded" />
+              <Skeleton className="h-4 w-5/6 rounded" />
+            </div>
+          </div>
+        </div>
+
+        {/* Charts Row 2 Skeletons */}
+        <div className="grid lg:grid-cols-2 gap-4">
+          <div className="bg-white rounded-2xl p-5 border border-border shadow-sm space-y-4">
+            <div className="space-y-1.5">
+              <Skeleton className="h-5 w-1/3 rounded" />
+              <Skeleton className="h-4 w-1/2 rounded" />
+            </div>
+            <Skeleton className="h-[180px] w-full rounded-xl" />
+          </div>
+          <div className="bg-white rounded-2xl p-5 border border-border shadow-sm space-y-4">
+            <div className="space-y-1.5">
+              <Skeleton className="h-5 w-1/3 rounded" />
+              <Skeleton className="h-4 w-1/2 rounded" />
+            </div>
+            <Skeleton className="h-[180px] w-full rounded-xl" />
+          </div>
+        </div>
+
+        {/* Live Queue Table Skeleton */}
+        <TableSkeleton headers={["Token", "Patient", "Doctor", "Room", "Status", "Wait Time"]} rowCount={5} />
       </div>
     );
   }
@@ -373,8 +458,16 @@ export function Dashboard() {
               })}
               {filtered.length === 0 && (
                 <tr>
-                  <td colSpan={6} className="text-center py-8 text-muted-foreground text-sm">
-                    No patients match your search.
+                  <td colSpan={6} className="p-8">
+                    <EmptyState
+                      icon={Search}
+                      title="No Patients Found"
+                      description={
+                        searchQ
+                          ? `We couldn't find any patient matching "${searchQ}" with status "${statusFilter}".`
+                          : `There are currently no patients with status "${statusFilter}" in the queue.`
+                      }
+                    />
                   </td>
                 </tr>
               )}
