@@ -1,9 +1,14 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { UserPlus, CheckCircle, RotateCcw, Clock, MapPin, User, Printer } from "lucide-react";
+import { UserPlus, CheckCircle, RotateCcw, Clock, MapPin, User, Printer, Users } from "lucide-react";
 import { doctorsService } from "../../services/doctors.service";
 import { patientsService } from "../../services/patients.service";
 import { socketService } from "../../services/socket";
+
+// UI Components
+import { CardSkeleton } from "./ui/CardSkeleton";
+import { EmptyState } from "./ui/EmptyState";
+import { ErrorState } from "./ui/ErrorState";
 
 interface SuccessToken {
   token: string;
@@ -24,10 +29,25 @@ export function AddPatient() {
   const [submitted, setSubmitted] = useState<SuccessToken | null>(null);
 
   // Load doctors list
-  const { data: doctorsData } = useQuery({
+  const { data: doctorsData, isLoading: isLoadingDoctors, isError: isErrorDoctors, refetch: refetchDoctors } = useQuery({
     queryKey: ["doctors"],
     queryFn: () => doctorsService.getDoctors(),
   });
+
+  // Socket updates for doctor list/availability changes
+  useEffect(() => {
+    socketService.connect();
+    const handleDoctorsUpdate = () => {
+      queryClient.invalidateQueries({ queryKey: ["doctors"] });
+    };
+    socketService.on("doctors:updated", handleDoctorsUpdate);
+    socketService.on("doctor-status-updated", handleDoctorsUpdate);
+
+    return () => {
+      socketService.off("doctors:updated", handleDoctorsUpdate);
+      socketService.off("doctor-status-updated", handleDoctorsUpdate);
+    };
+  }, [queryClient]);
 
   const doctors = doctorsData || [];
 
@@ -187,40 +207,49 @@ export function AddPatient() {
           <div className="bg-white rounded-2xl p-5 border border-border shadow-sm space-y-3">
             <h3 className="font-semibold text-sm uppercase tracking-wide text-muted-foreground">Select Doctor *</h3>
             <div className="space-y-2">
-              {doctors.map(doc => (
-                <label
-                  key={doc.id}
-                  className={`flex items-center justify-between p-4 rounded-xl border cursor-pointer transition-all ${
-                    form.doctorId === doc.id
-                      ? "border-primary bg-secondary"
-                      : "border-border hover:border-primary/40 hover:bg-muted/50"
-                  }`}
-                >
-                  <div className="flex items-center gap-3">
-                    <input
-                      type="radio"
-                      name="doctor"
-                      value={doc.id}
-                      checked={form.doctorId === doc.id}
-                      onChange={() => setForm(f => ({ ...f, doctorId: doc.id }))}
-                      className="w-4 h-4 accent-primary"
-                    />
-                    <div className="w-9 h-9 bg-primary rounded-full flex items-center justify-center text-white text-sm font-bold">
-                      {doc.name.split(" ").slice(-1)[0]?.[0] || doc.name[0]}
+              {isLoadingDoctors ? (
+                <CardSkeleton variant="doctor" count={2} />
+              ) : isErrorDoctors ? (
+                <ErrorState title="Failed to load doctors" onRetry={refetchDoctors} />
+              ) : doctors.length === 0 ? (
+                <EmptyState
+                  icon={Users}
+                  title="No Doctors Registered"
+                  description="We couldn't find any registered doctors. Please add a doctor in Settings first."
+                />
+              ) : (
+                doctors.map(doc => (
+                  <label
+                    key={doc.id}
+                    className={`flex items-center justify-between p-4 rounded-xl border cursor-pointer transition-all ${
+                      form.doctorId === doc.id
+                        ? "border-primary bg-secondary"
+                        : "border-border hover:border-primary/40 hover:bg-muted/50"
+                    }`}
+                  >
+                    <div className="flex items-center gap-3">
+                      <input
+                        type="radio"
+                        name="doctor"
+                        value={doc.id}
+                        checked={form.doctorId === doc.id}
+                        onChange={() => setForm(f => ({ ...f, doctorId: doc.id }))}
+                        className="w-4 h-4 accent-primary"
+                      />
+                      <div className="w-9 h-9 bg-primary rounded-full flex items-center justify-center text-white text-sm font-bold">
+                        {doc.name.split(" ").slice(-1)[0]?.[0] || doc.name[0]}
+                      </div>
+                      <div>
+                        <p className="text-sm font-semibold text-foreground">{doc.name}</p>
+                        <p className="text-xs text-muted-foreground">{doc.specialty} · {doc.room}</p>
+                      </div>
                     </div>
-                    <div>
-                      <p className="text-sm font-semibold text-foreground">{doc.name}</p>
-                      <p className="text-xs text-muted-foreground">{doc.specialty} · {doc.room}</p>
+                    <div className="text-right">
+                      <p className="text-sm font-semibold text-foreground">{doc.currentWait || doc.wait || "15 min"}</p>
+                      <p className="text-xs text-muted-foreground">est. wait</p>
                     </div>
-                  </div>
-                  <div className="text-right">
-                    <p className="text-sm font-semibold text-foreground">{doc.currentWait || doc.wait || "15 min"}</p>
-                    <p className="text-xs text-muted-foreground">est. wait</p>
-                  </div>
-                </label>
-              ))}
-              {doctors.length === 0 && (
-                <p className="text-sm text-muted-foreground text-center py-4">No doctors registered.</p>
+                  </label>
+                ))
               )}
             </div>
           </div>
@@ -252,7 +281,7 @@ export function AddPatient() {
           <div className="flex gap-3">
             <button
               type="submit"
-              disabled={registerMutation.isPending || !form.doctorId}
+              disabled={registerMutation.isPending || !form.doctorId || isLoadingDoctors}
               className="flex-1 bg-primary text-white py-3.5 rounded-xl font-semibold hover:bg-blue-700 transition-all disabled:opacity-60 flex items-center justify-center gap-2 shadow-md"
             >
               {registerMutation.isPending ? (
