@@ -194,8 +194,13 @@ export function PatientPortal({ onBack }: PatientPortalProps) {
 
     socketService.connect();
 
+    let debounceTimeout: any = null;
+
     const handleQueueUpdate = () => {
-      queryClient.invalidateQueries({ queryKey: ["patientQueueStatus", activeToken] });
+      if (debounceTimeout) clearTimeout(debounceTimeout);
+      debounceTimeout = setTimeout(() => {
+        queryClient.invalidateQueries({ queryKey: ["patientQueueStatus", activeToken] });
+      }, 400);
     };
 
     socketService.on("queue:updated", handleQueueUpdate);
@@ -214,6 +219,7 @@ export function PatientPortal({ onBack }: PatientPortalProps) {
     socketService.on("doctor-status-updated", handleQueueUpdate);
 
     return () => {
+      if (debounceTimeout) clearTimeout(debounceTimeout);
       socketService.off("queue:updated", handleQueueUpdate);
       socketService.off("patient:status-changed", handleQueueUpdate);
       socketService.off("patient:transferred", handleQueueUpdate);

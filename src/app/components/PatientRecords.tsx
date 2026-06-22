@@ -82,8 +82,14 @@ export function PatientRecords() {
   // Socket updates
   useEffect(() => {
     socketService.connect();
+
+    let debounceTimeout: any = null;
+
     const handleQueueUpdate = () => {
-      queryClient.invalidateQueries({ queryKey: ["patients"] });
+      if (debounceTimeout) clearTimeout(debounceTimeout);
+      debounceTimeout = setTimeout(() => {
+        queryClient.invalidateQueries({ queryKey: ["patients"] });
+      }, 400);
     };
 
     socketService.on("queue:updated", handleQueueUpdate);
@@ -101,6 +107,7 @@ export function PatientRecords() {
     socketService.on("wait-time-updated", handleQueueUpdate);
 
     return () => {
+      if (debounceTimeout) clearTimeout(debounceTimeout);
       socketService.off("queue:updated", handleQueueUpdate);
       socketService.off("queue-updated", handleQueueUpdate);
       socketService.off("patient-added", handleQueueUpdate);

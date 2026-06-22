@@ -88,13 +88,19 @@ export function Dashboard() {
   useEffect(() => {
     socketService.connect();
 
+    let debounceTimeout: any = null;
+
     const handleFullUpdate = () => {
-      queryClient.invalidateQueries({ queryKey: ["liveQueue"] });
-      queryClient.invalidateQueries({ queryKey: ["analyticsKpis"] });
-      queryClient.invalidateQueries({ queryKey: ["analyticsPeakHours"] });
-      queryClient.invalidateQueries({ queryKey: ["analyticsDoctorLoad"] });
-      queryClient.invalidateQueries({ queryKey: ["analyticsVolumeTrend"] });
-      queryClient.invalidateQueries({ queryKey: ["analyticsRoomUtilization"] });
+      if (debounceTimeout) clearTimeout(debounceTimeout);
+      
+      debounceTimeout = setTimeout(() => {
+        queryClient.invalidateQueries({ queryKey: ["liveQueue"] });
+        queryClient.invalidateQueries({ queryKey: ["analyticsKpis"] });
+        queryClient.invalidateQueries({ queryKey: ["analyticsPeakHours"] });
+        queryClient.invalidateQueries({ queryKey: ["analyticsDoctorLoad"] });
+        queryClient.invalidateQueries({ queryKey: ["analyticsVolumeTrend"] });
+        queryClient.invalidateQueries({ queryKey: ["analyticsRoomUtilization"] });
+      }, 400);
     };
 
     // Bind listeners
@@ -115,6 +121,7 @@ export function Dashboard() {
     socketService.on("doctor-status-updated", handleFullUpdate);
 
     return () => {
+      if (debounceTimeout) clearTimeout(debounceTimeout);
       socketService.off("queue:updated", handleFullUpdate);
       socketService.off("analytics:updated", handleFullUpdate);
       socketService.off("rooms:updated", handleFullUpdate);

@@ -62,8 +62,14 @@ export function TrackPatient() {
   // Socket updates
   useEffect(() => {
     socketService.connect();
+
+    let debounceTimeout: any = null;
+
     const handleQueueUpdate = () => {
-      queryClient.invalidateQueries({ queryKey: ["trackPatients"] });
+      if (debounceTimeout) clearTimeout(debounceTimeout);
+      debounceTimeout = setTimeout(() => {
+        queryClient.invalidateQueries({ queryKey: ["trackPatients"] });
+      }, 400);
     };
 
     socketService.on("queue:updated", handleQueueUpdate);
@@ -80,6 +86,7 @@ export function TrackPatient() {
     socketService.on("doctors:updated", handleQueueUpdate);
 
     return () => {
+      if (debounceTimeout) clearTimeout(debounceTimeout);
       socketService.off("queue:updated", handleQueueUpdate);
       socketService.off("queue-updated", handleQueueUpdate);
       socketService.off("patient-added", handleQueueUpdate);
