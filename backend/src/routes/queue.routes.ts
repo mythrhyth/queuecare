@@ -127,6 +127,90 @@ function getPriorityWeight(pri: string) {
   return 1;
 }
 
+// Helper to recalculate queue positions contiguously for a room
+export async function recalculateQueuePositions(tx: any, roomId: string, dateStr: string): Promise<void> {
+  const activePatients = await tx.patient.findMany({
+    where: {
+      roomId,
+      date: dateStr,
+      status: { in: ["Waiting", "In Queue", "In Consultation"] }
+    },
+    orderBy: [
+      { status: "desc" }, // In Consultation first
+      { position: "asc" }
+    ]
+  });
+
+  const consultationPatient = activePatients.find((p: any) => p.status === "In Consultation");
+  const waitingPatients = activePatients.filter((p: any) => p.status !== "In Consultation");
+
+  waitingPatients.sort((a: any, b: any) => {
+    const priA = getPriorityWeight(a.priority || a.type || "Normal");
+    const priB = getPriorityWeight(b.priority || b.type || "Normal");
+    if (priA !== priB) {
+      return priB - priA; // Higher priority first
+    }
+    return a.position - b.position;
+  });
+
+  const finalOrder = consultationPatient ? [consultationPatient, ...waitingPatients] : waitingPatients;
+
+  for (let i = 0; i < finalOrder.length; i++) {
+    if (finalOrder[i].position !== i) {
+      await tx.patient.update({
+        where: { id: finalOrder[i].id },
+        data: { position: i }
+      });
+    }
+  }
+}
+
+// Helper to cascade room changes to doctor's patients and recalculate queues
+export async function handleDoctorRoomChange(tx: any, doctorId: string, oldRoomId: string | null, newRoomId: string | null, dateStr: string): Promise<void> {
+  if (oldRoomId === newRoomId) return;
+
+  // Update roomId for all active patients of this doctor today
+  await tx.patient.updateMany({
+    where: {
+      doctorId,
+      date: dateStr,
+      status: { in: ["Waiting", "In Queue", "In Consultation"] }
+    },
+    data: {
+      roomId: newRoomId
+    }
+  });
+
+  // Recalculate old room if valid
+  if (oldRoomId) {
+    await recalculateQueuePositions(tx, oldRoomId, dateStr);
+  }
+
+  // Recalculate new room if valid
+  if (newRoomId) {
+    await recalculateQueuePositions(tx, newRoomId, dateStr);
+  }
+}
+
+// Centralized Socket.IO broadcasting helper
+export function broadcastQueueUpdate(io: any): void {
+  if (!io) return;
+  console.log("Broadcasting centralized real-time update events to all clients");
+  // Colon format
+  io.emit("queue:updated", {});
+  io.emit("rooms:updated", {});
+  io.emit("doctors:updated", {});
+  io.emit("settings:updated", {});
+  io.emit("analytics:updated", {});
+
+  // Dash format
+  io.emit("queue-updated", {});
+  io.emit("rooms-updated", {});
+  io.emit("wait-time-updated", {});
+  io.emit("doctor-status-updated", {});
+}
+
+
 // Helper for automatic patient promotion
 export async function promoteNextPatient(tx: any, doctorId: string | null, roomId: string | null, dateStr: string): Promise<any> {
   if (!doctorId || !roomId) return null;
@@ -215,21 +299,7 @@ export async function autoPromoteAllDoctors(io?: any): Promise<void> {
             });
 
             // Recalculate positions for all active patients in this room today
-            const activeRoomPatients = await tx.patient.findMany({
-              where: {
-                roomId: doc.roomId,
-                date: todayStr,
-                status: { in: ["Waiting", "In Queue", "In Consultation"] }
-              },
-              orderBy: { position: "asc" }
-            });
-
-            for (let i = 0; i < activeRoomPatients.length; i++) {
-              await tx.patient.update({
-                where: { id: activeRoomPatients[i].id },
-                data: { position: i }
-              });
-            }
+            await recalculateQueuePositions(tx, doc.roomId, todayStr);
 
             // Emit socket events if io is provided
             if (io) {
@@ -508,6 +578,8 @@ router.put("/:token/status", async (req: Request, res: Response, next: NextFunct
           room: promotedPatient.room?.name || ""
         });
       }
+
+      broadcastQueueUpdate(io);
     }
 
     return res.json(result);
@@ -780,6 +852,8 @@ router.put("/:token/transfer", async (req: Request, res: Response, next: NextFun
           room: promotedPatient.room?.name || ""
         });
       }
+
+      broadcastQueueUpdate(io);
     }
 
     return res.json(mappedResult);

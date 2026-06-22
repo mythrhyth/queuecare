@@ -2,7 +2,7 @@ import { Router, Request, Response, NextFunction } from "express";
 import { PrismaClient } from "@prisma/client";
 import { mapDoctor, mapRoom } from "../utils/mappers";
 import { getDoctorAveragesMap } from "../utils/waitTimes";
-import { autoPromoteAllDoctors } from "./queue.routes";
+import { autoPromoteAllDoctors, handleDoctorRoomChange, broadcastQueueUpdate } from "./queue.routes";
 
 const prisma = new PrismaClient();
 const router = Router();
@@ -42,7 +42,10 @@ router.put("/clinic", async (req: Request, res: Response, next: NextFunction) =>
     });
 
     const io = req.app.get("io");
-    if (io) io.emit("settings:updated", {});
+    if (io) {
+      io.emit("settings:updated", {});
+      broadcastQueueUpdate(io);
+    }
 
     return res.json(updated);
   } catch (error) {
@@ -81,7 +84,10 @@ router.put("/notifications", async (req: Request, res: Response, next: NextFunct
     });
 
     const io = req.app.get("io");
-    if (io) io.emit("settings:updated", {});
+    if (io) {
+      io.emit("settings:updated", {});
+      broadcastQueueUpdate(io);
+    }
 
     return res.json(updated);
   } catch (error) {
@@ -119,86 +125,91 @@ router.put("/doctors", async (req: Request, res: Response, next: NextFunction) =
       return res.status(400).json({ message: "Payload must be an array of doctors" });
     }
 
-    const incomingIds = payload.map((d: any) => d.id).filter(id => id && !id.includes("."));
-    const rooms = await prisma.room.findMany();
+    const todayStr = new Date().toISOString().split("T")[0];
 
-    // 1. Delete doctors not present in payload
-    await prisma.doctor.deleteMany({
-      where: {
-        id: { notIn: incomingIds }
-      }
-    });
+    const doctorsList = await prisma.$transaction(async (tx) => {
+      const incomingIds = payload.map((d: any) => d.id).filter(id => id && !id.includes("."));
+      const rooms = await tx.room.findMany();
 
-    // 2. Insert or update doctors in payload
-    for (const doc of payload) {
-      const roomName = doc.room; // Room name string, e.g. "Room 2"
-      let roomId = null;
-
-      if (roomName) {
-        let roomRecord = rooms.find(r => r.name === roomName);
-        if (!roomRecord) {
-          roomRecord = await prisma.room.create({
-            data: { name: roomName, capacity: 20, status: "Available" }
-          });
-          rooms.push(roomRecord);
-        }
-        roomId = roomRecord.id;
-      }
-
-      // Check if it's a valid database UUID or timestamp id
-      const existing = await prisma.doctor.findFirst({
+      // 1. Delete doctors not present in payload
+      await tx.doctor.deleteMany({
         where: {
-          OR: [
-            { id: doc.id },
-            { name: doc.name }
-          ]
+          id: { notIn: incomingIds }
         }
       });
 
-      if (existing) {
-        await prisma.doctor.update({
-          where: { id: existing.id },
-          data: {
-            name: doc.name,
-            specialty: doc.specialty,
-            available: doc.available,
-            roomId
+      // 2. Insert or update doctors in payload
+      for (const doc of payload) {
+        const roomName = doc.room; // Room name string, e.g. "Room 2"
+        let roomId = null;
+
+        if (roomName) {
+          let roomRecord = rooms.find(r => r.name === roomName);
+          if (!roomRecord) {
+            roomRecord = await tx.room.create({
+              data: { name: roomName, capacity: 20, status: "Available" }
+            });
+            rooms.push(roomRecord);
+          }
+          roomId = roomRecord.id;
+        }
+
+        // Check if it's a valid database UUID or timestamp id
+        const existing = await tx.doctor.findFirst({
+          where: {
+            OR: [
+              { id: doc.id },
+              { name: doc.name }
+            ]
           }
         });
-      } else {
-        await prisma.doctor.create({
-          data: {
-            name: doc.name,
-            specialty: doc.specialty,
-            available: doc.available,
-            roomId
-          }
-        });
-      }
-    }
 
-    const io = req.app.get("io");
-    await autoPromoteAllDoctors(io);
-
-    // Return the updated doctors list
-    const todayStr = new Date().toISOString().split("T")[0];
-    const doctors = await prisma.doctor.findMany({
-      include: {
-        room: true,
-        patients: {
-          where: { date: todayStr }
+        if (existing) {
+          await tx.doctor.update({
+            where: { id: existing.id },
+            data: {
+              name: doc.name,
+              specialty: doc.specialty,
+              available: doc.available,
+              roomId
+            }
+          });
+          // Cascade doctor room change to today's active patients
+          await handleDoctorRoomChange(tx, existing.id, existing.roomId, roomId, todayStr);
+        } else {
+          await tx.doctor.create({
+            data: {
+              name: doc.name,
+              specialty: doc.specialty,
+              available: doc.available,
+              roomId
+            }
+          });
         }
       }
+
+      // Return the updated doctors list
+      return await tx.doctor.findMany({
+        include: {
+          room: true,
+          patients: {
+            where: { date: todayStr }
+          }
+        }
+      });
     });
 
     const config = await prisma.clinicConfig.findUnique({ where: { id: "default" } }) || { avgConsultTime: "15" } as any;
 
+    const io = req.app.get("io");
+    await autoPromoteAllDoctors(io);
     if (io) {
       io.emit("doctors:updated", {});
       io.emit("doctor-status-updated", {});
+      broadcastQueueUpdate(io);
     }
 
-    return res.json(doctors.map(d => mapDoctor(d, config)));
+    return res.json(doctorsList.map(d => mapDoctor(d, config)));
   } catch (error) {
     next(error);
   }
@@ -249,76 +260,82 @@ router.put("/rooms", async (req: Request, res: Response, next: NextFunction) => 
       return res.status(400).json({ message: "Payload must be an array of rooms" });
     }
 
-    const incomingIds = payload.map((r: any) => r.id).filter(id => id && !id.includes("."));
+    const todayStr = new Date().toISOString().split("T")[0];
 
-    // 1. Delete rooms not in incoming list
-    await prisma.room.deleteMany({
-      where: {
-        id: { notIn: incomingIds }
-      }
-    });
+    const roomsList = await prisma.$transaction(async (tx) => {
+      const incomingIds = payload.map((r: any) => r.id).filter(id => id && !id.includes("."));
 
-    // 2. Insert or update rooms in payload
-    for (const r of payload) {
-      const existing = await prisma.room.findFirst({
+      // 1. Delete rooms not in incoming list
+      await tx.room.deleteMany({
         where: {
-          OR: [
-            { id: r.id },
-            { name: r.name }
-          ]
+          id: { notIn: incomingIds }
         }
       });
 
-      let roomId = "";
-      if (existing) {
-        const updated = await prisma.room.update({
-          where: { id: existing.id },
-          data: {
-            name: r.name,
-            capacity: Number(r.capacity) || 20,
-            status: r.status || "Available"
+      // 2. Insert or update rooms in payload
+      for (const r of payload) {
+        const existing = await tx.room.findFirst({
+          where: {
+            OR: [
+              { id: r.id },
+              { name: r.name }
+            ]
           }
         });
-        roomId = updated.id;
-      } else {
-        const created = await prisma.room.create({
-          data: {
-            name: r.name,
-            capacity: Number(r.capacity) || 20,
-            status: r.status || "Available"
-          }
-        });
-        roomId = created.id;
-      }
 
-      // Re-link doctor assigned by name
-      const docName = r.doctorName || r.doctor;
-      if (docName && roomId) {
-        const doctor = await prisma.doctor.findFirst({ where: { name: docName } });
-        if (doctor) {
-          await prisma.doctor.update({
-            where: { id: doctor.id },
-            data: { roomId }
-          });
-        }
-      }
-    }
-
-    // Return the updated rooms list
-    const todayStr = new Date().toISOString().split("T")[0];
-    const rooms = await prisma.room.findMany({
-      include: {
-        doctors: {
-          include: {
-            patients: {
-              where: { date: todayStr }
+        let roomId = "";
+        if (existing) {
+          const updated = await tx.room.update({
+            where: { id: existing.id },
+            data: {
+              name: r.name,
+              capacity: Number(r.capacity) || 20,
+              status: r.status || "Available"
             }
+          });
+          roomId = updated.id;
+        } else {
+          const created = await tx.room.create({
+            data: {
+              name: r.name,
+              capacity: Number(r.capacity) || 20,
+              status: r.status || "Available"
+            }
+          });
+          roomId = created.id;
+        }
+
+        // Re-link doctor assigned by name
+        const docName = r.doctorName || r.doctor;
+        if (docName && roomId) {
+          const doctor = await tx.doctor.findFirst({ where: { name: docName } });
+          if (doctor && doctor.roomId !== roomId) {
+            const oldRoomId = doctor.roomId;
+            await tx.doctor.update({
+              where: { id: doctor.id },
+              data: { roomId }
+            });
+            // Cascade doctor room change to today's active patients
+            await handleDoctorRoomChange(tx, doctor.id, oldRoomId, roomId, todayStr);
           }
-        },
-        patients: {
-          where: { date: todayStr }
         }
       }
+
+      // Return the updated rooms list
+      return await tx.room.findMany({
+        include: {
+          doctors: {
+            include: {
+              patients: {
+                where: { date: todayStr }
+              }
+            }
+          },
+          patients: {
+            where: { date: todayStr }
+          }
+        }
+      });
     });
 
     const allActivePatients = await prisma.patient.findMany({
@@ -334,9 +351,12 @@ router.put("/rooms", async (req: Request, res: Response, next: NextFunction) => 
 
     const io = req.app.get("io");
     await autoPromoteAllDoctors(io);
-    if (io) io.emit("rooms:updated", {});
+    if (io) {
+      io.emit("rooms:updated", {});
+      broadcastQueueUpdate(io);
+    }
 
-    return res.json(rooms.map(r => mapRoom(r, config, allActivePatients, docAverages)));
+    return res.json(roomsList.map(r => mapRoom(r, config, allActivePatients, docAverages)));
   } catch (error) {
     next(error);
   }

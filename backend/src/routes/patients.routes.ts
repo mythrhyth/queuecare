@@ -2,7 +2,7 @@ import { Router, Request, Response, NextFunction } from "express";
 import { PrismaClient } from "@prisma/client";
 import { mapPatient } from "../utils/mappers";
 import { getDoctorAveragesMap } from "../utils/waitTimes";
-import { promoteNextPatient, autoPromoteAllDoctors } from "./queue.routes";
+import { promoteNextPatient, autoPromoteAllDoctors, broadcastQueueUpdate } from "./queue.routes";
 
 const prisma = new PrismaClient();
 const router = Router();
@@ -327,6 +327,8 @@ router.post("/", async (req: Request, res: Response, next: NextFunction) => {
           room: finalPatient.room?.name || ""
         });
       }
+
+      broadcastQueueUpdate(io);
     }
 
     return res.status(201).json(result);
