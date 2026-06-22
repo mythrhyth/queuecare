@@ -1,9 +1,7 @@
 import { Router, Request, Response, NextFunction } from "express";
-import { PrismaClient } from "@prisma/client";
+import { prisma } from "../utils/db";
 import { mapPatient } from "../utils/mappers";
 import { getDoctorAveragesMap } from "../utils/waitTimes";
-
-const prisma = new PrismaClient();
 const router = Router();
 
 // GET /queue/live
@@ -299,7 +297,7 @@ export async function autoPromoteAllDoctors(io?: any): Promise<void> {
             });
 
             // Recalculate positions for all active patients in this room today
-            await recalculateQueuePositions(tx, doc.roomId, todayStr);
+            await recalculateQueuePositions(tx, doc.roomId!, todayStr);
 
             // Emit socket events if io is provided
             if (io) {

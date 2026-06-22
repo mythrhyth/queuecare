@@ -1,7 +1,5 @@
 import { Router, Request, Response, NextFunction } from "express";
-import { PrismaClient } from "@prisma/client";
-
-const prisma = new PrismaClient();
+import { prisma } from "../utils/db";
 const router = Router();
 
 // GET /analytics/kpis

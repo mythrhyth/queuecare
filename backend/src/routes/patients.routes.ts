@@ -1,10 +1,8 @@
 import { Router, Request, Response, NextFunction } from "express";
-import { PrismaClient } from "@prisma/client";
+import { prisma } from "../utils/db";
 import { mapPatient } from "../utils/mappers";
 import { getDoctorAveragesMap } from "../utils/waitTimes";
 import { promoteNextPatient, autoPromoteAllDoctors, broadcastQueueUpdate } from "./queue.routes";
-
-const prisma = new PrismaClient();
 const router = Router();
 
 // GET /patients

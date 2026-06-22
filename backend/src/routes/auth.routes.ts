@@ -1,10 +1,8 @@
 import { Router, Response, NextFunction } from "express";
-import { PrismaClient } from "@prisma/client";
+import { prisma } from "../utils/db";
 import * as bcrypt from "bcryptjs";
 import * as jwt from "jsonwebtoken";
 import { authMiddleware, AuthenticatedRequest } from "../middleware/auth.middleware";
-
-const prisma = new PrismaClient();
 const router = Router();
 const JWT_SECRET = process.env.JWT_SECRET || "super-secret-key-queuecare";
 
