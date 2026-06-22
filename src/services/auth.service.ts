@@ -9,7 +9,7 @@ export const authService = {
 
   async logout(): Promise<void> {
     try {
-      await api.post("/auth/logout");
+      await api.post("api/auth/logout");
     } catch (error) {
       console.warn("Failed to notify backend of logout:", error);
     }
