@@ -88,14 +88,8 @@ export function Dashboard() {
   useEffect(() => {
     socketService.connect();
 
-    const handleQueueUpdate = () => {
+    const handleFullUpdate = () => {
       queryClient.invalidateQueries({ queryKey: ["liveQueue"] });
-      queryClient.invalidateQueries({ queryKey: ["analyticsKpis"] });
-      queryClient.invalidateQueries({ queryKey: ["analyticsDoctorLoad"] });
-      queryClient.invalidateQueries({ queryKey: ["analyticsRoomUtilization"] });
-    };
-
-    const handleAnalyticsUpdate = () => {
       queryClient.invalidateQueries({ queryKey: ["analyticsKpis"] });
       queryClient.invalidateQueries({ queryKey: ["analyticsPeakHours"] });
       queryClient.invalidateQueries({ queryKey: ["analyticsDoctorLoad"] });
@@ -103,48 +97,38 @@ export function Dashboard() {
       queryClient.invalidateQueries({ queryKey: ["analyticsRoomUtilization"] });
     };
 
-    const handleRoomsUpdate = () => {
-      queryClient.invalidateQueries({ queryKey: ["analyticsRoomUtilization"] });
-      queryClient.invalidateQueries({ queryKey: ["liveQueue"] });
-    };
-
-    const handleDoctorsUpdate = () => {
-      queryClient.invalidateQueries({ queryKey: ["analyticsDoctorLoad"] });
-      queryClient.invalidateQueries({ queryKey: ["liveQueue"] });
-    };
-
     // Bind listeners
-    socketService.on("queue:updated", handleQueueUpdate);
-    socketService.on("analytics:updated", handleAnalyticsUpdate);
-    socketService.on("rooms:updated", handleRoomsUpdate);
-    socketService.on("doctors:updated", handleDoctorsUpdate);
+    socketService.on("queue:updated", handleFullUpdate);
+    socketService.on("analytics:updated", handleFullUpdate);
+    socketService.on("rooms:updated", handleFullUpdate);
+    socketService.on("doctors:updated", handleFullUpdate);
 
     // Standardized new events
-    socketService.on("queue-updated", handleQueueUpdate);
-    socketService.on("patient-added", handleQueueUpdate);
-    socketService.on("patient-updated", handleQueueUpdate);
-    socketService.on("patient-promoted", handleQueueUpdate);
-    socketService.on("patient-completed", handleQueueUpdate);
-    socketService.on("patient-cancelled", handleQueueUpdate);
-    socketService.on("patient-transferred", handleQueueUpdate);
-    socketService.on("wait-time-updated", handleQueueUpdate);
-    socketService.on("doctor-status-updated", handleQueueUpdate);
+    socketService.on("queue-updated", handleFullUpdate);
+    socketService.on("patient-added", handleFullUpdate);
+    socketService.on("patient-updated", handleFullUpdate);
+    socketService.on("patient-promoted", handleFullUpdate);
+    socketService.on("patient-completed", handleFullUpdate);
+    socketService.on("patient-cancelled", handleFullUpdate);
+    socketService.on("patient-transferred", handleFullUpdate);
+    socketService.on("wait-time-updated", handleFullUpdate);
+    socketService.on("doctor-status-updated", handleFullUpdate);
 
     return () => {
-      socketService.off("queue:updated", handleQueueUpdate);
-      socketService.off("analytics:updated", handleAnalyticsUpdate);
-      socketService.off("rooms:updated", handleRoomsUpdate);
-      socketService.off("doctors:updated", handleDoctorsUpdate);
+      socketService.off("queue:updated", handleFullUpdate);
+      socketService.off("analytics:updated", handleFullUpdate);
+      socketService.off("rooms:updated", handleFullUpdate);
+      socketService.off("doctors:updated", handleFullUpdate);
 
-      socketService.off("queue-updated", handleQueueUpdate);
-      socketService.off("patient-added", handleQueueUpdate);
-      socketService.off("patient-updated", handleQueueUpdate);
-      socketService.off("patient-promoted", handleQueueUpdate);
-      socketService.off("patient-completed", handleQueueUpdate);
-      socketService.off("patient-cancelled", handleQueueUpdate);
-      socketService.off("patient-transferred", handleQueueUpdate);
-      socketService.off("wait-time-updated", handleQueueUpdate);
-      socketService.off("doctor-status-updated", handleQueueUpdate);
+      socketService.off("queue-updated", handleFullUpdate);
+      socketService.off("patient-added", handleFullUpdate);
+      socketService.off("patient-updated", handleFullUpdate);
+      socketService.off("patient-promoted", handleFullUpdate);
+      socketService.off("patient-completed", handleFullUpdate);
+      socketService.off("patient-cancelled", handleFullUpdate);
+      socketService.off("patient-transferred", handleFullUpdate);
+      socketService.off("wait-time-updated", handleFullUpdate);
+      socketService.off("doctor-status-updated", handleFullUpdate);
     };
   }, [queryClient]);
 

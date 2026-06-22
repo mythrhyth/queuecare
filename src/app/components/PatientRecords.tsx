@@ -94,6 +94,11 @@ export function PatientRecords() {
     socketService.on("patient-completed", handleQueueUpdate);
     socketService.on("patient-cancelled", handleQueueUpdate);
     socketService.on("patient-transferred", handleQueueUpdate);
+    socketService.on("rooms:updated", handleQueueUpdate);
+    socketService.on("rooms-updated", handleQueueUpdate);
+    socketService.on("doctors:updated", handleQueueUpdate);
+    socketService.on("doctor-status-updated", handleQueueUpdate);
+    socketService.on("wait-time-updated", handleQueueUpdate);
 
     return () => {
       socketService.off("queue:updated", handleQueueUpdate);
@@ -104,6 +109,11 @@ export function PatientRecords() {
       socketService.off("patient-completed", handleQueueUpdate);
       socketService.off("patient-cancelled", handleQueueUpdate);
       socketService.off("patient-transferred", handleQueueUpdate);
+      socketService.off("rooms:updated", handleQueueUpdate);
+      socketService.off("rooms-updated", handleQueueUpdate);
+      socketService.off("doctors:updated", handleQueueUpdate);
+      socketService.off("doctor-status-updated", handleQueueUpdate);
+      socketService.off("wait-time-updated", handleQueueUpdate);
     };
   }, [queryClient]);
 
