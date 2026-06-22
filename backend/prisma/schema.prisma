@@ -57,6 +57,10 @@ model Patient {
   consultationStartedAt DateTime?
   consultationEndedAt   DateTime?
   consultationDuration  Int?      // in seconds
+
+  @@index([date, status])
+  @@index([doctorId, date, status])
+  @@index([roomId, date, status, position])
 }
 
 model ClinicConfig {
