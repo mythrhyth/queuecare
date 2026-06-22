@@ -160,7 +160,7 @@ router.put("/:id", async (req: Request, res: Response, next: NextFunction) => {
           }
         }
       });
-    });
+    }, { timeout: 20000 });
 
     const config = await prisma.clinicConfig.findUnique({ where: { id: "default" } }) || { avgConsultTime: "15" } as any;
 

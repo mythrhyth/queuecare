@@ -258,7 +258,7 @@ router.post("/", async (req: Request, res: Response, next: NextFunction) => {
           });
 
           return createdPatient;
-        });
+        }, { timeout: 20000 });
 
         // Break on success
         break;

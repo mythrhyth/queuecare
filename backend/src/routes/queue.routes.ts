@@ -254,84 +254,88 @@ export async function autoPromoteAllDoctors(io?: any): Promise<void> {
   const todayStr = new Date().toISOString().split("T")[0];
 
   try {
-    await prisma.$transaction(async (tx) => {
-      // 1. Get all available doctors who are assigned to a room
-      const availableDoctors = await tx.doctor.findMany({
-        where: {
-          available: true,
-          roomId: { not: null }
-        }
-      });
-
-      for (const doc of availableDoctors) {
-        // 2. Check if this doctor already has a patient "In Consultation" today
-        const activeConsultation = await tx.patient.findFirst({
-          where: {
-            doctorId: doc.id,
-            date: todayStr,
-            status: "In Consultation"
-          }
-        });
-
-        if (!activeConsultation) {
-          // 3. Find the first waiting/in queue patient for this doctor today
-          const nextPatient = await tx.patient.findFirst({
-            where: {
-              roomId: doc.roomId,
-              doctorId: doc.id,
-              date: todayStr,
-              status: { in: ["Waiting", "In Queue"] }
-            },
-            orderBy: { position: "asc" }
-          });
-
-          if (nextPatient) {
-            // Promote this patient to In Consultation
-            const promoted = await tx.patient.update({
-              where: { id: nextPatient.id },
-              data: {
-                status: "In Consultation",
-                consultationStartedAt: new Date()
-              },
-              include: { doctor: true, room: true }
-            });
-
-            // Recalculate positions for all active patients in this room today
-            await recalculateQueuePositions(tx, doc.roomId!, todayStr);
-
-            // Emit socket events if io is provided
-            if (io) {
-              console.log(`Auto-promoted token ${promoted.token} for doctor ${doc.name}`);
-              
-              // Standard events
-              io.emit("queue:updated", {});
-              io.emit("patient:status-changed", {
-                token: promoted.token,
-                status: "In Consultation",
-                doctor: promoted.doctor?.name || "",
-                room: promoted.room?.name || ""
-              });
-
-              // Standardized new events
-              io.emit("queue-updated", {});
-              io.emit("wait-time-updated", {});
-              io.emit("patient-updated", {
-                token: promoted.token,
-                status: "In Consultation",
-                doctor: promoted.doctor?.name || "",
-                room: promoted.room?.name || ""
-              });
-              io.emit("patient-promoted", {
-                token: promoted.token,
-                status: "In Consultation",
-                doctor: promoted.doctor?.name || "",
-                room: promoted.room?.name || ""
-              });
-            }
-          }
-        }
+    // 1. Get all available doctors who are assigned to a room (outside of transaction)
+    const availableDoctors = await prisma.doctor.findMany({
+      where: {
+        available: true,
+        roomId: { not: null }
       }
     });
+
+    for (const doc of availableDoctors) {
+      try {
+        await prisma.$transaction(async (tx) => {
+          // 2. Check if this doctor already has a patient "In Consultation" today
+          const activeConsultation = await tx.patient.findFirst({
+            where: {
+              doctorId: doc.id,
+              date: todayStr,
+              status: "In Consultation"
+            }
+          });
+
+          if (!activeConsultation) {
+            // 3. Find the first waiting/in queue patient for this doctor today
+            const nextPatient = await tx.patient.findFirst({
+              where: {
+                roomId: doc.roomId,
+                doctorId: doc.id,
+                date: todayStr,
+                status: { in: ["Waiting", "In Queue"] }
+              },
+              orderBy: { position: "asc" }
+            });
+
+            if (nextPatient) {
+              // Promote this patient to In Consultation
+              const promoted = await tx.patient.update({
+                where: { id: nextPatient.id },
+                data: {
+                  status: "In Consultation",
+                  consultationStartedAt: new Date()
+                },
+                include: { doctor: true, room: true }
+              });
+
+              // Recalculate positions for all active patients in this room today
+              await recalculateQueuePositions(tx, doc.roomId!, todayStr);
+
+              // Emit socket events if io is provided
+              if (io) {
+                console.log(`Auto-promoted token ${promoted.token} for doctor ${doc.name}`);
+                
+                // Standard events
+                io.emit("queue:updated", {});
+                io.emit("patient:status-changed", {
+                  token: promoted.token,
+                  status: "In Consultation",
+                  doctor: promoted.doctor?.name || "",
+                  room: promoted.room?.name || ""
+                });
+
+                // Standardized new events
+                io.emit("queue-updated", {});
+                io.emit("wait-time-updated", {});
+                io.emit("patient-updated", {
+                  token: promoted.token,
+                  status: "In Consultation",
+                  doctor: promoted.doctor?.name || "",
+                  room: promoted.room?.name || ""
+                });
+                io.emit("patient-promoted", {
+                  token: promoted.token,
+                  status: "In Consultation",
+                  doctor: promoted.doctor?.name || "",
+                  room: promoted.room?.name || ""
+                });
+              }
+            }
+          }
+        }, { timeout: 15000 });
+      } catch (docError) {
+        console.error(`Error promoting patients for doctor ${doc.name}:`, docError);
+      }
+    }
   } catch (error) {
     console.error("Error in autoPromoteAllDoctors:", error);
   }
@@ -490,7 +494,7 @@ router.put("/:token/status", async (req: Request, res: Response, next: NextFunct
         where: { id: patient.id },
         include: { doctor: true, room: true }
       });
-    });
+    }, { timeout: 20000 });
 
     if (!updatedPatient) {
       return res.status(404).json({ message: "Patient not found" });
@@ -742,7 +746,7 @@ router.put("/:token/transfer", async (req: Request, res: Response, next: NextFun
       }
 
       return { newPatient: createdPatient, targetPromotedPatient: null as any };
-    });
+    }, { timeout: 20000 });
 
     if (!newPatient) {
       return res.status(404).json({ message: "Transferred patient not found" });

@@ -195,7 +195,7 @@ router.put("/doctors", async (req: Request, res: Response, next: NextFunction) =
           }
         }
       });
-    });
+    }, { timeout: 20000 });
 
     const config = await prisma.clinicConfig.findUnique({ where: { id: "default" } }) || { avgConsultTime: "15" } as any;
 
@@ -334,7 +334,7 @@ router.put("/rooms", async (req: Request, res: Response, next: NextFunction) => 
           }
         }
       });
-    });
+    }, { timeout: 20000 });
 
     const allActivePatients = await prisma.patient.findMany({
       where: {
