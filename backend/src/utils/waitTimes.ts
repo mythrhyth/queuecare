@@ -32,24 +32,38 @@ export async function getDoctorAveragesMap(
     globalBasedOn = `Global clinic average (${globalCount} consultations)`;
   }
 
-  // Calculate doctor-specific averages
-  for (const doc of doctors) {
-    const docCompleted = await prisma.patient.aggregate({
-      where: {
-        doctorId: doc.id,
-        status: "Completed",
-        consultationDuration: { not: null }
-      },
-      _avg: {
-        consultationDuration: true
-      },
-      _count: {
-        id: true
-      }
-    });
+  // Optimized: Calculate doctor-specific averages using groupBy
+  const docCompletedAggregates = await prisma.patient.groupBy({
+    by: ['doctorId'],
+    where: {
+      status: "Completed",
+      consultationDuration: { not: null },
+      doctorId: { not: null }
+    },
+    _avg: {
+      consultationDuration: true
+    },
+    _count: {
+      id: true
+    }
+  });
 
-    const docCount = docCompleted._count.id;
-    const docAvgSec = docCompleted._avg.consultationDuration;
+  // Convert aggregates to a fast-lookup map
+  const aggregateMap: Record<string, { count: number; avgSec: number | null }> = {};
+  for (const agg of docCompletedAggregates) {
+    if (agg.doctorId) {
+      aggregateMap[agg.doctorId] = {
+        count: agg._count.id,
+        avgSec: agg._avg.consultationDuration
+      };
+    }
+  }
+
+  // Map averages back to all doctors
+  for (const doc of doctors) {
+    const docData = aggregateMap[doc.id];
+    const docCount = docData ? docData.count : 0;
+    const docAvgSec = docData ? docData.avgSec : null;
 
     if (docCount >= 3 && docAvgSec !== null) {
       const avgMin = Math.round(docAvgSec / 60);
