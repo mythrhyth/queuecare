@@ -52,6 +52,7 @@ class SocketService {
       auth: {
         token: token ? `Bearer ${token}` : "",
       },
+      transports: ["websocket"],
       autoConnect: true,
       reconnection: true,
       reconnectionAttempts: Infinity, // keep attempting to reconnect indefinitely

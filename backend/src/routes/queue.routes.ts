@@ -7,8 +7,6 @@ const router = Router();
 // GET /queue/live
 router.get("/live", async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const io = req.app.get("io");
-    await autoPromoteAllDoctors(io);
     const todayStr = new Date().toISOString().split("T")[0];
 
     // Get patients who are not completed/skipped, or keep skipped if they are in queue page
@@ -51,8 +49,6 @@ router.get("/live", async (req: Request, res: Response, next: NextFunction) => {
 router.get("/:token", async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { token } = req.params;
-    const io = req.app.get("io");
-    await autoPromoteAllDoctors(io);
     const todayStr = new Date().toISOString().split("T")[0];
 
     const patient = await prisma.patient.findUnique({
@@ -262,78 +258,117 @@ export async function autoPromoteAllDoctors(io?: any): Promise<void> {
       }
     });
 
+    if (availableDoctors.length === 0) return;
+
+    // 2. Fetch all active patients today to check status in memory (fast read query)
+    const activePatients = await prisma.patient.findMany({
+      where: {
+        date: todayStr,
+        status: { in: ["In Consultation", "Waiting", "In Queue"] }
+      },
+      select: {
+        id: true,
+        token: true,
+        status: true,
+        position: true,
+        doctorId: true,
+        roomId: true
+      }
+    });
+
+    // Group patients by doctorId in memory
+    const patientsByDoctor: Record<string, typeof activePatients> = {};
+    for (const p of activePatients) {
+      if (p.doctorId) {
+        if (!patientsByDoctor[p.doctorId]) {
+          patientsByDoctor[p.doctorId] = [];
+        }
+        patientsByDoctor[p.doctorId].push(p);
+      }
+    }
+
     for (const doc of availableDoctors) {
-      try {
-        await prisma.$transaction(async (tx) => {
-          // 2. Check if this doctor already has a patient "In Consultation" today
-          const activeConsultation = await tx.patient.findFirst({
-            where: {
-              doctorId: doc.id,
-              date: todayStr,
-              status: "In Consultation"
-            }
-          });
+      const docPatients = patientsByDoctor[doc.id] || [];
+      const hasActiveConsultation = docPatients.some(p => p.status === "In Consultation");
 
-          if (!activeConsultation) {
-            // 3. Find the first waiting/in queue patient for this doctor today
-            const nextPatient = await tx.patient.findFirst({
-              where: {
-                roomId: doc.roomId,
-                doctorId: doc.id,
-                date: todayStr,
-                status: { in: ["Waiting", "In Queue"] }
-              },
-              orderBy: { position: "asc" }
-            });
+      if (!hasActiveConsultation) {
+        // Find the first waiting/in queue patient for this doctor in memory
+        const waitingPatients = docPatients
+          .filter(p => p.status === "Waiting" || p.status === "In Queue")
+          .sort((a, b) => a.position - b.position);
 
-            if (nextPatient) {
-              // Promote this patient to In Consultation
-              const promoted = await tx.patient.update({
-                where: { id: nextPatient.id },
-                data: {
-                  status: "In Consultation",
-                  consultationStartedAt: new Date()
-                },
-                include: { doctor: true, room: true }
+        const nextPatient = waitingPatients[0];
+        if (nextPatient) {
+          try {
+            // ONLY start transaction when we know we need to promote a patient!
+            await prisma.$transaction(async (tx) => {
+              // Double check inside transaction to prevent race conditions
+              const activeConsultationTx = await tx.patient.findFirst({
+                where: {
+                  doctorId: doc.id,
+                  date: todayStr,
+                  status: "In Consultation"
+                }
               });
 
-              // Recalculate positions for all active patients in this room today
-              await recalculateQueuePositions(tx, doc.roomId!, todayStr);
-
-              // Emit socket events if io is provided
-              if (io) {
-                console.log(`Auto-promoted token ${promoted.token} for doctor ${doc.name}`);
-                
-                // Standard events
-                io.emit("queue:updated", {});
-                io.emit("patient:status-changed", {
-                  token: promoted.token,
-                  status: "In Consultation",
-                  doctor: promoted.doctor?.name || "",
-                  room: promoted.room?.name || ""
+              if (!activeConsultationTx) {
+                const nextPatientTx = await tx.patient.findFirst({
+                  where: {
+                    id: nextPatient.id,
+                    status: { in: ["Waiting", "In Queue"] }
+                  }
                 });
 
-                // Standardized new events
-                io.emit("queue-updated", {});
-                io.emit("wait-time-updated", {});
-                io.emit("patient-updated", {
-                  token: promoted.token,
-                  status: "In Consultation",
-                  doctor: promoted.doctor?.name || "",
-                  room: promoted.room?.name || ""
-                });
-                io.emit("patient-promoted", {
-                  token: promoted.token,
-                  status: "In Consultation",
-                  doctor: promoted.doctor?.name || "",
-                  room: promoted.room?.name || ""
-                });
+                if (nextPatientTx) {
+                  // Promote this patient to In Consultation
+                  const promoted = await tx.patient.update({
+                    where: { id: nextPatientTx.id },
+                    data: {
+                      status: "In Consultation",
+                      consultationStartedAt: new Date()
+                    },
+                    include: { doctor: true, room: true }
+                  });
+
+                  // Recalculate positions for all active patients in this room today
+                  await recalculateQueuePositions(tx, doc.roomId!, todayStr);
+
+                  // Emit socket events if io is provided
+                  if (io) {
+                    console.log(`Auto-promoted token ${promoted.token} for doctor ${doc.name}`);
+                    
+                    // Standard events
+                    io.emit("queue:updated", {});
+                    io.emit("patient:status-changed", {
+                      token: promoted.token,
+                      status: "In Consultation",
+                      doctor: promoted.doctor?.name || "",
+                      room: promoted.room?.name || ""
+                    });
+
+                    // Standardized new events
+                    io.emit("queue-updated", {});
+                    io.emit("wait-time-updated", {});
+                    io.emit("patient-updated", {
+                      token: promoted.token,
+                      status: "In Consultation",
+                      doctor: promoted.doctor?.name || "",
+                      room: promoted.room?.name || ""
+                    });
+                    io.emit("patient-promoted", {
+                      token: promoted.token,
+                      status: "In Consultation",
+                      doctor: promoted.doctor?.name || "",
+                      room: promoted.room?.name || ""
+                    });
+                  }
+                }
               }
-            }
+            }, { timeout: 15000 });
+          } catch (docError) {
+            console.error(`Error promoting patients for doctor ${doc.name}:`, docError);
           }
-        }, { timeout: 15000 });
-      } catch (docError) {
-        console.error(`Error promoting patients for doctor ${doc.name}:`, docError);
+        }
       }
     }
   } catch (error) {

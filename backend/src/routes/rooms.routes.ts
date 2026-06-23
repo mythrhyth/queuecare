@@ -8,8 +8,6 @@ const router = Router();
 // GET /rooms
 router.get("/", async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const io = req.app.get("io");
-    await autoPromoteAllDoctors(io);
     const todayStr = new Date().toISOString().split("T")[0];
 
     const rooms = await prisma.room.findMany({
@@ -49,8 +47,6 @@ router.get("/", async (req: Request, res: Response, next: NextFunction) => {
 router.get("/:id/queue", async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { id } = req.params;
-    const io = req.app.get("io");
-    await autoPromoteAllDoctors(io);
     const todayStr = new Date().toISOString().split("T")[0];
 
     const room = await prisma.room.findUnique({ where: { id } });

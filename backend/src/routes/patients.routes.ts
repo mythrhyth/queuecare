@@ -8,9 +8,6 @@ const router = Router();
 // GET /patients
 router.get("/", async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const io = req.app.get("io");
-    await autoPromoteAllDoctors(io);
-
     const { status, type, search, date, fromDate, toDate } = req.query;
 
     const todayStr = new Date().toISOString().split("T")[0];

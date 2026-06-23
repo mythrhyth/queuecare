@@ -17,15 +17,16 @@ const io = new Server(server, {
     ],
     methods: ["GET", "POST", "PUT", "DELETE", "PATCH"],
     credentials: true
-  }
+  },
+  transports: ["websocket"]
 });
 
 // Attach socket.io server instance to express app context
 app.set("io", io);
 
-io.on("connection", async (socket) => {
+io.on("connection", (socket) => {
   console.log("Socket client connected:", socket.id);
-  await autoPromoteAllDoctors(io);
+  autoPromoteAllDoctors(io).catch(err => console.error("Error in connection auto-promotion:", err));
 
   // Authenticate socket token if provided (optional but good practice)
   const token = socket.handshake.auth?.token;
