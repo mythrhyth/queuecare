@@ -4,7 +4,7 @@ export function mapPatient(
   patient: DbPatient & { doctor?: DbDoctor | null; room?: DbRoom | null },
   config: ClinicConfig,
   allRoomPatients: DbPatient[], // must include all active patients in the same room today
-  doctorAverages?: Record<string, { avgTime: number; basedOn: string }>
+  doctorAverages?: Record<string, any>
 ) {
   // Active queue patients in the same room are those in status: Waiting, In Queue, In Consultation
   const activeRoomPatients = allRoomPatients
@@ -30,12 +30,22 @@ export function mapPatient(
       ? doctorAverages[patient.doctorId].basedOn
       : "Configured average consultation time");
 
-  const waitTimeVal = totalAhead * avgTime;
-  const waitTime = patient.status === "In Consultation" ? "0 min" : `${waitTimeVal} min`;
+  const regressionModel = doctorAverages && patient.doctorId ? doctorAverages[patient.doctorId]?.regression : null;
 
-  const waitTimeExplanation = patient.status === "In Consultation"
-    ? "It's your turn! Please proceed to the consultation room."
-    : `Based on:\n- ${totalAhead} patient${totalAhead === 1 ? "" : "s"} ahead\n- ${waitTimeBasedOn} (${avgTime} min)`;
+  let waitTimeVal = 0;
+  let waitTimeExplanation = "";
+
+  if (patient.status === "In Consultation") {
+    waitTimeExplanation = "It's your turn! Please proceed to the consultation room.";
+  } else if (regressionModel) {
+    waitTimeVal = Math.max(0, Math.round(regressionModel.intercept + regressionModel.slope * totalAhead));
+    waitTimeExplanation = `Based on Linear Regression Model:\n- ${totalAhead} patient${totalAhead === 1 ? "" : "s"} ahead\n- Formula: ${Math.round(regressionModel.intercept)}m baseline + ${regressionModel.slope.toFixed(1)}m per patient (based on ${regressionModel.pointsCount} historical consults, R² = ${regressionModel.r2.toFixed(2)})`;
+  } else {
+    waitTimeVal = totalAhead * avgTime;
+    waitTimeExplanation = `Based on:\n- ${totalAhead} patient${totalAhead === 1 ? "" : "s"} ahead\n- ${waitTimeBasedOn} (${avgTime} min)`;
+  }
+
+  const waitTime = patient.status === "In Consultation" ? "0 min" : `${waitTimeVal} min`;
 
   // Find if there is currently a patient in consultation for this doctor/room
   const inConsultPatient = activeRoomPatients.find(p => p.status === "In Consultation");
@@ -66,7 +76,8 @@ export function mapPatient(
 
 export function mapDoctor(
   doctor: DbDoctor & { room?: DbRoom | null; patients?: DbPatient[] },
-  config: ClinicConfig
+  config: ClinicConfig,
+  doctorAverages?: Record<string, any>
 ) {
   // Patients waiting for this doctor (Waiting or In Queue)
   const waitingPatients = (doctor.patients || []).filter(p =>
@@ -74,8 +85,15 @@ export function mapDoctor(
   );
 
   const patientsWaiting = waitingPatients.length;
-  const avgTime = (doctor as any).estimatedConsultationDuration ?? (Number(config.avgConsultTime) || 15);
-  const waitTimeVal = patientsWaiting * avgTime;
+  const regressionModel = doctorAverages && doctorAverages[doctor.id]?.regression;
+
+  let waitTimeVal = 0;
+  if (regressionModel) {
+    waitTimeVal = Math.max(0, Math.round(regressionModel.intercept + regressionModel.slope * patientsWaiting));
+  } else {
+    const avgTime = (doctor as any).estimatedConsultationDuration ?? (Number(config.avgConsultTime) || 15);
+    waitTimeVal = patientsWaiting * avgTime;
+  }
   const currentWait = `${waitTimeVal} min`;
 
   return {

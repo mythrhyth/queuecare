@@ -317,14 +317,32 @@ export function AddPatient() {
                 type="tel"
                 value={form.phone}
                 onChange={e => {
-                  let val = e.target.value;
-                  if (!val.startsWith("+91")) {
-                    val = "+91" + val.replace(/^\+?9?1?/, "");
+                  const inputVal = e.target.value;
+                  
+                  let rawDigits = "";
+                  if (inputVal.startsWith("+91")) {
+                    rawDigits = inputVal.slice(3).replace(/\D/g, "");
+                  } else {
+                    const allDigits = inputVal.replace(/\D/g, "");
+                    if (allDigits.length > 10 && allDigits.startsWith("91")) {
+                      rawDigits = allDigits.slice(2);
+                    } else {
+                      rawDigits = allDigits;
+                    }
                   }
-                  const prefix = "+91";
-                  const rest = val.slice(3);
-                  const cleanedRest = rest.replace(/[^\d\s]/g, "");
-                  setForm(f => ({ ...f, phone: prefix + cleanedRest }));
+                  
+                  const cleanDigits = rawDigits.slice(0, 10);
+                  
+                  let formatted = "+91";
+                  if (cleanDigits.length > 0) {
+                    if (cleanDigits.length <= 5) {
+                      formatted = `+91 ${cleanDigits}`;
+                    } else {
+                      formatted = `+91 ${cleanDigits.slice(0, 5)} ${cleanDigits.slice(5)}`;
+                    }
+                  }
+                  
+                  setForm(f => ({ ...f, phone: formatted }));
                   if (phoneError) setPhoneError(null);
                 }}
                 placeholder="+91 98765 43210"

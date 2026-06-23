@@ -2,6 +2,7 @@ import { Router, Request, Response, NextFunction } from "express";
 import { prisma } from "../utils/db";
 import { mapDoctor } from "../utils/mappers";
 import { autoPromoteAllDoctors, handleDoctorRoomChange, broadcastQueueUpdate } from "./queue.routes";
+import { getDoctorAveragesMap } from "../utils/waitTimes";
 const router = Router();
 
 // GET /doctors
@@ -19,8 +20,10 @@ router.get("/", async (req: Request, res: Response, next: NextFunction) => {
     });
 
     const config = await prisma.clinicConfig.findUnique({ where: { id: "default" } }) || { avgConsultTime: "15" } as any;
+    const defaultAvg = Number(config.avgConsultTime) || 15;
+    const docAverages = await getDoctorAveragesMap(prisma, defaultAvg);
 
-    const mapped = doctors.map(d => mapDoctor(d, config));
+    const mapped = doctors.map(d => mapDoctor(d, config, docAverages));
     return res.json(mapped);
   } catch (error) {
     next(error);
@@ -48,8 +51,10 @@ router.get("/:id", async (req: Request, res: Response, next: NextFunction) => {
     }
 
     const config = await prisma.clinicConfig.findUnique({ where: { id: "default" } }) || { avgConsultTime: "15" } as any;
+    const defaultAvg = Number(config.avgConsultTime) || 15;
+    const docAverages = await getDoctorAveragesMap(prisma, defaultAvg);
 
-    return res.json(mapDoctor(doctor, config));
+    return res.json(mapDoctor(doctor, config, docAverages));
   } catch (error) {
     next(error);
   }
@@ -163,6 +168,8 @@ router.put("/:id", async (req: Request, res: Response, next: NextFunction) => {
     }, { timeout: 20000 });
 
     const config = await prisma.clinicConfig.findUnique({ where: { id: "default" } }) || { avgConsultTime: "15" } as any;
+    const defaultAvg = Number(config.avgConsultTime) || 15;
+    const docAverages = await getDoctorAveragesMap(prisma, defaultAvg);
 
     // Trigger socket broadcast
     const io = req.app.get("io");
@@ -173,7 +180,7 @@ router.put("/:id", async (req: Request, res: Response, next: NextFunction) => {
       broadcastQueueUpdate(io);
     }
 
-    return res.json(mapDoctor(fullDoctor!, config));
+    return res.json(mapDoctor(fullDoctor!, config, docAverages));
   } catch (error) {
     next(error);
   }
