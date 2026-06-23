@@ -4,6 +4,7 @@ import { UserPlus, CheckCircle, RotateCcw, Clock, MapPin, User, Printer, Users }
 import { doctorsService } from "../../services/doctors.service";
 import { patientsService } from "../../services/patients.service";
 import { socketService } from "../../services/socket";
+import { jsPDF } from "jspdf";
 
 // UI Components
 import { CardSkeleton } from "./ui/CardSkeleton";
@@ -22,11 +23,12 @@ export function AddPatient() {
   const queryClient = useQueryClient();
   const [form, setForm] = useState({
     name: "",
-    phone: "",
+    phone: "+91",
     doctorId: "",
     priority: "Normal",
   });
   const [submitted, setSubmitted] = useState<SuccessToken | null>(null);
+  const [phoneError, setPhoneError] = useState<string | null>(null);
 
   // Load doctors list
   const { data: doctorsData, isLoading: isLoadingDoctors, isError: isErrorDoctors, refetch: refetchDoctors } = useQuery({
@@ -80,12 +82,128 @@ export function AddPatient() {
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!form.doctorId) return;
+
+    // Validate phone number (must be +91 followed by exactly 10 digits starting with 6-9)
+    const cleanedPhone = form.phone.replace(/\s+/g, "");
+    const phoneRegex = /^\+91[6-9]\d{9}$/;
+    if (!phoneRegex.test(cleanedPhone)) {
+      setPhoneError("Please enter a valid 10-digit Indian mobile number starting with 6-9");
+      return;
+    }
+
+    setPhoneError(null);
     registerMutation.mutate(form);
   };
 
   const handleReset = () => {
-    setForm({ name: "", phone: "", doctorId: "", priority: "Normal" });
+    setForm({ name: "", phone: "+91", doctorId: "", priority: "Normal" });
     setSubmitted(null);
+    setPhoneError(null);
+  };
+
+  const handleDownloadPDF = () => {
+    if (!submitted) return;
+
+    const doc = new jsPDF({
+      orientation: "portrait",
+      unit: "mm",
+      format: [80, 105],
+    });
+
+    // Brand Header
+    doc.setFont("helvetica", "bold");
+    doc.setTextColor(37, 99, 235); // primary color
+    doc.setFontSize(14);
+    doc.text("QUEUECARE HEALTHCARE", 40, 12, { align: "center" });
+
+    doc.setFont("helvetica", "normal");
+    doc.setTextColor(107, 114, 128);
+    doc.setFontSize(8);
+    doc.text("Smart Patient Queue System", 40, 16, { align: "center" });
+
+    // Separator
+    doc.setDrawColor(229, 231, 235);
+    doc.setLineWidth(0.3);
+    doc.line(6, 20, 74, 20);
+
+    // Token Section
+    doc.setFont("helvetica", "normal");
+    doc.setTextColor(107, 114, 128);
+    doc.setFontSize(9);
+    doc.text("YOUR TOKEN NUMBER", 40, 26, { align: "center" });
+
+    doc.setFont("helvetica", "bold");
+    doc.setTextColor(17, 24, 39);
+    doc.setFontSize(38);
+    doc.text(submitted.token, 40, 40, { align: "center" });
+
+    // Priority badge
+    let badgeColor = "#2563eb";
+    if (submitted.priority.includes("Emergency")) {
+      badgeColor = "#dc2626";
+    } else if (submitted.priority.includes("Senior")) {
+      badgeColor = "#ea580c";
+    }
+
+    doc.setFont("helvetica", "bold");
+    doc.setTextColor(badgeColor);
+    doc.setFontSize(9);
+    doc.text(submitted.priority.toUpperCase(), 40, 47, { align: "center" });
+
+    // Separator line
+    doc.setDrawColor(229, 231, 235);
+    doc.line(15, 52, 65, 52);
+
+    // Info details
+    doc.setTextColor(17, 24, 39);
+    doc.setFontSize(9);
+    
+    const startY = 60;
+    const lineHeight = 6;
+
+    doc.setFont("helvetica", "bold");
+    doc.text("Doctor:", 10, startY);
+    doc.setFont("helvetica", "normal");
+    const cleanDoctor = submitted.doctor.replace(/\n/g, " ");
+    doc.text(cleanDoctor, 28, startY);
+
+    doc.setFont("helvetica", "bold");
+    doc.text("Room:", 10, startY + lineHeight);
+    doc.setFont("helvetica", "normal");
+    doc.text(submitted.room, 28, startY + lineHeight);
+
+    doc.setFont("helvetica", "bold");
+    doc.text("Est. Wait:", 10, startY + (lineHeight * 2));
+    doc.setFont("helvetica", "normal");
+    doc.text(submitted.wait, 28, startY + (lineHeight * 2));
+
+    doc.setFont("helvetica", "bold");
+    doc.text("Printed At:", 10, startY + (lineHeight * 3));
+    doc.setFont("helvetica", "normal");
+    const timestamp = new Date().toLocaleTimeString("en-IN", {
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: true,
+    }) + " (" + new Date().toLocaleDateString("en-IN", {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+    }) + ")";
+    doc.text(timestamp, 28, startY + (lineHeight * 3));
+
+    // Footer line
+    doc.setDrawColor(229, 231, 235);
+    doc.line(6, startY + (lineHeight * 3) + 6, 74, startY + (lineHeight * 3) + 6);
+
+    // Footer Text
+    doc.setFont("helvetica", "italic");
+    doc.setTextColor(107, 114, 128);
+    doc.setFontSize(7.5);
+    const footerY = startY + (lineHeight * 3) + 11;
+    doc.text("Please wait for your token to be announced on the screens.", 40, footerY, { align: "center" });
+    doc.text("Get well soon!", 40, footerY + 4, { align: "center" });
+
+    doc.save(`Token_${submitted.token}.pdf`);
   };
 
   const PRIORITY_COLORS: Record<string, string> = {
@@ -145,7 +263,10 @@ export function AddPatient() {
                   <UserPlus className="w-4 h-4" />
                   Add Another Patient
                 </button>
-                <button className="flex items-center justify-center gap-2 px-5 py-3.5 rounded-xl border border-border text-foreground hover:bg-muted transition-colors font-medium">
+                <button
+                  onClick={handleDownloadPDF}
+                  className="flex items-center justify-center gap-2 px-5 py-3.5 rounded-xl border border-border text-foreground hover:bg-muted transition-colors font-medium"
+                >
                   <Printer className="w-4 h-4" />
                   Print Token
                 </button>
@@ -195,11 +316,26 @@ export function AddPatient() {
               <input
                 type="tel"
                 value={form.phone}
-                onChange={e => setForm(f => ({ ...f, phone: e.target.value }))}
+                onChange={e => {
+                  let val = e.target.value;
+                  if (!val.startsWith("+91")) {
+                    val = "+91" + val.replace(/^\+?9?1?/, "");
+                  }
+                  const prefix = "+91";
+                  const rest = val.slice(3);
+                  const cleanedRest = rest.replace(/[^\d\s]/g, "");
+                  setForm(f => ({ ...f, phone: prefix + cleanedRest }));
+                  if (phoneError) setPhoneError(null);
+                }}
                 placeholder="+91 98765 43210"
                 required
-                className="w-full px-4 py-3 bg-muted rounded-xl border border-border focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary transition-all text-sm"
+                className={`w-full px-4 py-3 bg-muted rounded-xl border focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary transition-all text-sm ${
+                  phoneError ? "border-red-500 focus:ring-red-500/30 focus:border-red-500" : "border-border"
+                }`}
               />
+              {phoneError && (
+                <p className="text-red-500 text-xs mt-1.5 font-medium">{phoneError}</p>
+              )}
             </div>
           </div>
 
