@@ -688,29 +688,19 @@ router.put("/:token/transfer", async (req: Request, res: Response, next: NextFun
         }
       }
 
-      // Mark old patient record as status "Transferred", and append unique suffix to the token
-      const timestamp = Date.now();
-      const transferredToken = `${token}-TR-${timestamp}`;
-
-      await tx.patient.update({
-        where: { id: patient.id },
-        data: {
-          token: transferredToken,
-          status: "Transferred",
-          position: -1
-        }
-      });
-
-      // Promote the next patient for the old doctor in the old room
-      promotedPatient = await promoteNextPatient(tx, patient.doctorId, patient.roomId, todayStr);
-      promotedToken = promotedPatient ? promotedPatient.token : null;
+      // Promote the next patient for the old doctor in the old room (since this patient is leaving)
+      if (patient.doctorId !== targetDoctorId || oldRoomId !== targetRoomId) {
+        promotedPatient = await promoteNextPatient(tx, patient.doctorId, patient.roomId, todayStr);
+        promotedToken = promotedPatient ? promotedPatient.token : null;
+      }
 
       // Get active patients in the target room to compute priority insertion position
       const activeTargetPatients = await tx.patient.findMany({
         where: {
           roomId: targetRoomId,
           date: todayStr,
-          status: { in: ["Waiting", "In Queue", "In Consultation"] }
+          status: { in: ["Waiting", "In Queue", "In Consultation"] },
+          id: { not: patient.id }
         },
         orderBy: { position: "asc" }
       });
@@ -738,22 +728,17 @@ router.put("/:token/transfer", async (req: Request, res: Response, next: NextFun
         });
       }
 
-      // Create new patient record in target room
-      const createdPatient = await tx.patient.create({
+      // Update patient record in-place
+      const updatedPatient = await tx.patient.update({
+        where: { id: patient.id },
         data: {
-          token, // original token
-          name: patient.name,
-          phone: patient.phone,
-          type: patient.type,
           status: "Waiting",
-          date: patient.date,
-          registeredAt: patient.registeredAt,
-          createdAt: patient.createdAt,
-          notes: patient.notes,
-          priority: patient.priority,
           position: insertIdx,
           doctorId: targetDoctorId,
-          roomId: targetRoomId
+          roomId: targetRoomId,
+          consultationStartedAt: null,
+          consultationEndedAt: null,
+          consultationDuration: null
         },
         include: {
           doctor: true,
@@ -767,7 +752,8 @@ router.put("/:token/transfer", async (req: Request, res: Response, next: NextFun
           where: {
             roomId: oldRoomId,
             date: todayStr,
-            status: { in: ["Waiting", "In Queue", "In Consultation"] }
+            status: { in: ["Waiting", "In Queue", "In Consultation"] },
+            id: { not: patient.id }
           },
           orderBy: { position: "asc" }
         });
@@ -780,11 +766,11 @@ router.put("/:token/transfer", async (req: Request, res: Response, next: NextFun
         }
       }
 
-      return { newPatient: createdPatient, targetPromotedPatient: null as any };
+      return { newPatient: updatedPatient, targetPromotedPatient: null as any };
     }, { timeout: 20000 });
 
     if (!newPatient) {
-      return res.status(404).json({ message: "Transferred patient not found" });
+      return res.status(404).json({ message: "Patient not found" });
     }
 
     // Load configs
@@ -804,14 +790,12 @@ router.put("/:token/transfer", async (req: Request, res: Response, next: NextFun
     if (io) {
       console.log(`Broadcasting patient:transferred and queue:updated for token ${token}`);
       
-      const timestamp = Date.now();
-
       // Standard events
       io.emit("queue:updated", {});
       io.emit("patient:transferred", { token, room: roomName });
       io.emit("patient:status-changed", {
         token,
-        status: "Transferred",
+        status: newPatient.status,
         doctor: newPatient.doctor?.name || "",
         room: newPatient.room?.name || ""
       });
@@ -823,25 +807,10 @@ router.put("/:token/transfer", async (req: Request, res: Response, next: NextFun
           room: promotedPatient.room?.name || ""
         });
       }
-      if (tPromoted && tPromoted.id !== newPatient.id) {
-        io.emit("patient:status-changed", {
-          token: tPromoted.token,
-          status: "In Consultation",
-          doctor: tPromoted.doctor?.name || "",
-          room: tPromoted.room?.name || ""
-        });
-      }
 
       // Standardized new events
       io.emit("queue-updated", {});
       io.emit("wait-time-updated", {});
-      
-      io.emit("patient-updated", {
-        token: `${token}-TR-${timestamp}`,
-        status: "Transferred",
-        doctor: newPatient.doctor?.name || "",
-        room: newPatient.room?.name || ""
-      });
       io.emit("patient-transferred", { token, room: roomName });
 
       io.emit("patient-updated", {
@@ -857,21 +826,6 @@ router.put("/:token/transfer", async (req: Request, res: Response, next: NextFun
           status: newPatient.status,
           doctor: newPatient.doctor?.name || "",
           room: newPatient.room?.name || ""
-        });
-      }
-
-      if (tPromoted && tPromoted.id !== newPatient.id) {
-        io.emit("patient-updated", {
-          token: tPromoted.token,
-          status: "In Consultation",
-          doctor: tPromoted.doctor?.name || "",
-          room: tPromoted.room?.name || ""
-        });
-        io.emit("patient-promoted", {
-          token: tPromoted.token,
-          status: "In Consultation",
-          doctor: tPromoted.doctor?.name || "",
-          room: tPromoted.room?.name || ""
         });
       }
 
