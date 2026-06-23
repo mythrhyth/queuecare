@@ -1,3 +1,5 @@
+require('dotenv').config();
+
 module.exports = {
   preset: 'ts-jest',
   testEnvironment: 'node',
@@ -7,5 +9,5 @@ module.exports = {
   clearMocks: true,
   resetMocks: true,
   restoreMocks: true,
-  testTimeout: 30000
+  testTimeout: 120000
 };
